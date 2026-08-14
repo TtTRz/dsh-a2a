@@ -1,0 +1,23 @@
+# dsh-a2a bundle patch. Install into a profile with
+# `dsh plugin --profile web add dsh-a2a`, then configure the server listen
+# address and the remote-agent registry through the row below or env vars.
+
+- insert:
+    - id: a2a
+      name: dsh-a2a
+      config:
+        server:
+          # The A2A endpoint (Agent Card + JSON-RPC + HTTP+JSON REST).
+          # Set A2A_ENABLED=0 to run the client tools only.
+          enabled: !!js process.env.A2A_ENABLED !== '0'
+          host: !!js process.env.A2A_HOST ?? '127.0.0.1'
+          port: !!js (Number(process.env.A2A_PORT) || 8899)
+          preset: standard
+          turnTimeoutMs: 300000
+          agentCard:
+            name: dsh-a2a
+            description: A DeepSeek Harness agent exposed over the A2A protocol.
+            version: '0.1.0'
+        # Remote A2A agents the a2a_call / a2a_list tools may reach.
+        # Headers may use ${ENV_VAR} placeholders resolved at call time.
+        agents: []

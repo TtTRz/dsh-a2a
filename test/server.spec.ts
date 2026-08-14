@@ -1,0 +1,233 @@
+/**
+ * Server-half integration: a real A2A HTTP endpoint (Agent Card + JSON-RPC)
+ * driven by the DshAgentExecutor over a stubbed harness context, exercised
+ * end to end with the official A2A client.
+ */
+
+import type { Message } from '@a2a-js/sdk'
+import { Role as RoleEnum } from '@a2a-js/sdk'
+import { ClientFactory, ClientFactoryOptions } from '@a2a-js/sdk/client'
+import type { ExecutionEventBus } from '@a2a-js/sdk/server'
+import type { Context } from '@deepseek-ai/cordis'
+import { describe, expect, it } from 'vitest'
+import { resolveConfig } from '../src/config.js'
+import { DshAgentExecutor, textPart } from '../src/executor.js'
+import { A2aServer } from '../src/server.js'
+import { freePort } from './net.js'
+
+interface SessionEventLike {
+  type: string
+  data: unknown
+}
+
+/** A minimal agent stand-in: appends a reply event, then goes idle. */
+class FakeAgent {
+  status: 'idle' | 'busy' = 'idle'
+  readonly session = { events: [] as SessionEventLike[] }
+  private resolveIdle?: () => void
+  /** When true, the turn never finishes until cancel() is called. */
+  hang = false
+  cancelled = false
+
+  followup(): void {
+    this.status = 'busy'
+    if (this.hang) return
+    this.session.events.push({
+      type: 'assistant/message',
+      data: {
+        message: {
+          content: [
+            { type: 'reasoning', text: 'thinking' },
+            { type: 'text', text: 'pong' },
+          ],
+        },
+      },
+    })
+    queueMicrotask(() => this.resolveIdle?.())
+  }
+
+  whenIdle(): Promise<void> {
+    return new Promise((resolve) => {
+      this.resolveIdle = () => {
+        this.status = 'idle'
+        resolve()
+      }
+    })
+  }
+
+  cancel(): void {
+    this.cancelled = true
+    this.status = 'idle'
+    this.resolveIdle?.()
+  }
+}
+
+interface CreateCall {
+  sessionId: string
+  setup?: (agentCtx: Context) => Promise<void>
+}
+
+function fakeCtx(agents: Map<string, FakeAgent> = new Map()): Context {
+  const ctx = {
+    get: () => undefined,
+    agents: {
+      get: (id: string) => agents.get(id),
+      create: async ({ sessionId, setup }: CreateCall) => {
+        await setup?.({ agentPresets: { mount: async () => undefined } } as unknown as Context)
+        const agent = new FakeAgent()
+        agents.set(sessionId, agent)
+        return { agent, dispose: async () => undefined }
+      },
+    },
+    agentPresets: { resolve: async () => ({ id: 'standard' }), mount: async () => undefined },
+    logger: console,
+  }
+  return ctx as unknown as Context
+}
+
+function userMessage(text: string): Message {
+  return {
+    role: RoleEnum.ROLE_USER,
+    parts: [textPart(text)],
+    messageId: 'm-1',
+    taskId: '',
+    contextId: '',
+    extensions: [],
+    referenceTaskIds: [],
+    metadata: undefined,
+  }
+}
+
+function collectingBus(): { bus: ExecutionEventBus; events: unknown[] } {
+  const events: unknown[] = []
+  const bus: ExecutionEventBus = {
+    publish: (event: unknown) => {
+      events.push(event)
+    },
+    on: () => bus,
+    off: () => bus,
+    once: () => bus,
+    removeAllListeners: () => bus,
+    finished: () => undefined,
+  }
+  return { bus, events }
+}
+
+describe('A2A server with a harness executor', () => {
+  it('serves the Agent Card and answers a JSON-RPC SendMessage with the agent reply', async () => {
+    const port = await freePort()
+    const agents = new Map<string, FakeAgent>()
+    const ctx = fakeCtx(agents)
+    const executor = new DshAgentExecutor(ctx, { preset: 'standard', turnTimeoutMs: 10_000 })
+    const server = new A2aServer({
+      config: resolveConfig({
+        server: { host: '127.0.0.1', port, agentCard: { name: 'test-agent' } },
+      }).server,
+      executor,
+    })
+    await server.start()
+    try {
+      // Agent Card discovery over plain HTTP.
+      const cardResponse = await fetch(`${server.url}.well-known/agent-card.json`)
+      expect(cardResponse.status).toBe(200)
+      const card = (await cardResponse.json()) as { name: string }
+      expect(card.name).toBe('test-agent')
+
+      // Blocking SendMessage through the official client.
+      const client = await new ClientFactory(ClientFactoryOptions.default).createFromUrl(server.url)
+      const result = await client.sendMessage({
+        tenant: '',
+        message: userMessage('hello'),
+        configuration: undefined,
+        metadata: undefined,
+      })
+      expect('role' in result && result.role === RoleEnum.ROLE_AGENT).toBe(true)
+      const reply = (result as Message).parts
+        .map((part) => (part.content?.$case === 'text' ? part.content.value : ''))
+        .join('')
+      expect(reply).toBe('pong')
+    } finally {
+      await server.stop()
+    }
+  })
+
+  it('keeps per-context sessions and continues the same agent', async () => {
+    const port = await freePort()
+    const agents = new Map<string, FakeAgent>()
+    const executor = new DshAgentExecutor(fakeCtx(agents), {
+      preset: 'standard',
+      turnTimeoutMs: 10_000,
+    })
+    const server = new A2aServer({
+      config: resolveConfig({ server: { host: '127.0.0.1', port } }).server,
+      executor,
+    })
+    await server.start()
+    try {
+      const client = await new ClientFactory(ClientFactoryOptions.default).createFromUrl(server.url)
+      const message = (text: string): Message => ({
+        ...userMessage(text),
+        messageId: Math.random().toString(),
+        contextId: 'ctx-1',
+      })
+      await client.sendMessage({
+        tenant: '',
+        message: message('one'),
+        configuration: undefined,
+        metadata: undefined,
+      })
+      await client.sendMessage({
+        tenant: '',
+        message: message('two'),
+        configuration: undefined,
+        metadata: undefined,
+      })
+      // Both turns ran on the same derived session.
+      const ids = [...agents.keys()]
+      expect(ids).toHaveLength(1)
+      expect(ids[0]).toMatch(/^a2a-/)
+    } finally {
+      await server.stop()
+    }
+  })
+
+  it('cancels a running turn through cancelTask', async () => {
+    const port = await freePort()
+    const agents = new Map<string, FakeAgent>()
+    const ctx = fakeCtx(agents)
+    const executor = new DshAgentExecutor(ctx, { preset: 'standard', turnTimeoutMs: 10_000 })
+    const { bus, events } = collectingBus()
+    const hanging = new FakeAgent()
+    hanging.hang = true
+    ;(
+      ctx as unknown as {
+        agents: { create: () => Promise<{ agent: FakeAgent; dispose: () => Promise<void> }> }
+      }
+    ).agents.create = async () => ({ agent: hanging, dispose: async () => undefined })
+
+    const taskId = 'task-1'
+    const requestContext = {
+      taskId,
+      contextId: 'ctx-1',
+      context: {},
+      userMessage: userMessage('hello'),
+      request: {
+        tenant: '',
+        message: userMessage('hello'),
+        configuration: undefined,
+        metadata: undefined,
+      },
+    } as never
+    const execution = executor.execute(requestContext, bus)
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    await executor.cancelTask(taskId, bus)
+    await execution
+    expect(hanging.cancelled).toBe(true)
+    const states = (events as Array<{ kind: string; data?: { status?: { state: number } } }>)
+      .filter((event) => event.kind === 'statusUpdate')
+      .map((event) => event.data?.status?.state)
+    expect(states).toContain(2) // TASK_STATE_WORKING
+    expect(states).toContain(5) // TASK_STATE_CANCELED
+    expect(port).toBeGreaterThan(0)
+  })
+})

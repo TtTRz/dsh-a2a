@@ -1,0 +1,87 @@
+{
+  "name": "dsh-a2a",
+  "version": "0.1.0",
+  "description": "dsh-a2a: A2A v1.0 for DeepSeek Harness — expose the harness as an A2A agent and call remote A2A agents from agent tools.",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "cordis.patch.yml",
+    "README.md",
+    "README.zh.md",
+    "LICENSE"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "biome check .",
+    "format": "biome format --write .",
+    "check": "biome check . && npm run typecheck && npm run test && npm run build",
+    "prepack": "npm run build",
+    "prepare": "npm run build"
+  },
+  "keywords": [
+    "deepseek",
+    "deepseek-harness",
+    "dsh",
+    "a2a",
+    "agent2agent",
+    "agent",
+    "protocol",
+    "cordis"
+  ],
+  "license": "MIT",
+  "author": "TtTRz <romc1224@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TtTRz/dsh-a2a.git"
+  },
+  "bugs": {
+    "url": "https://github.com/TtTRz/dsh-a2a/issues"
+  },
+  "homepage": "https://github.com/TtTRz/dsh-a2a#readme",
+  "engines": {
+    "node": ">=22.19"
+  },
+  "dependencies": {
+    "@a2a-js/sdk": "^1.0.1",
+    "@deepseek-ai/schemastery": "^3.18.1"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": ">=4.0.1",
+    "@deepseek-ai/dsh-agent": ">=0.1.0-rc.6",
+    "@deepseek-ai/dsh-agent-default-model": ">=0.1.0-rc.6",
+    "@deepseek-ai/dsh-agent-presets": ">=0.1.0-rc.6",
+    "@deepseek-ai/dsh-llm": ">=0.1.0-rc.6",
+    "@deepseek-ai/dsh-tools": ">=0.1.0-rc.6"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.8",
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-agent": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-agent-default-model": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-agent-presets": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-llm": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-session": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-tools": "^0.1.0-rc.6",
+    "@types/node": "^24.3.0",
+    "tsup": "^8.5.0",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  }
+}
