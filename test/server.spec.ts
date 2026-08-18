@@ -230,4 +230,71 @@ describe('A2A server with a harness executor', () => {
     expect(states).toContain(5) // TASK_STATE_CANCELED
     expect(port).toBeGreaterThan(0)
   })
+
+  it('enforces the configured API key on everything but the Agent Card', async () => {
+    const port = await freePort()
+    const executor = new DshAgentExecutor(fakeCtx(), { preset: 'standard', turnTimeoutMs: 10_000 })
+    const server = new A2aServer({
+      config: resolveConfig({ server: { host: '127.0.0.1', port, apiKey: 'secret' } }).server,
+      executor,
+    })
+    await server.start()
+    try {
+      // The Agent Card stays public for discovery and declares the scheme.
+      const cardResponse = await fetch(`${server.url}.well-known/agent-card.json`)
+      expect(cardResponse.status).toBe(200)
+      const card = (await cardResponse.json()) as {
+        securitySchemes: Record<string, unknown>
+        securityRequirements: Array<{ schemes: Record<string, unknown> }>
+      }
+      expect('bearer' in card.securitySchemes).toBe(true)
+      expect(card.securityRequirements.length).toBeGreaterThan(0)
+
+      const body = JSON.stringify({ message: { role: 'user', parts: [{ type: 'text', text: 'hi' }] } })
+      // No credentials → 401.
+      const noAuth = await fetch(`${server.url}message:send`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+      })
+      expect(noAuth.status).toBe(401)
+      // Wrong credentials → 401.
+      const badAuth = await fetch(`${server.url}message:send`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer wrong' },
+        body,
+      })
+      expect(badAuth.status).toBe(401)
+      // Correct credentials pass the fence (the business reply may still vary).
+      const goodAuth = await fetch(`${server.url}message:send`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer secret' },
+        body,
+      })
+      expect(goodAuth.status).not.toBe(401)
+    } finally {
+      await server.stop()
+    }
+  })
+
+  it('advertises the configured public URL on the Agent Card', async () => {
+    const port = await freePort()
+    const executor = new DshAgentExecutor(fakeCtx(), { preset: 'standard', turnTimeoutMs: 10_000 })
+    const server = new A2aServer({
+      config: resolveConfig({
+        server: { host: '127.0.0.1', port, publicUrl: 'https://agents.example.com/' },
+      }).server,
+      executor,
+    })
+    await server.start()
+    try {
+      expect(server.url).toBe('https://agents.example.com/')
+      const cardResponse = await fetch(`http://127.0.0.1:${port}/.well-known/agent-card.json`)
+      expect(cardResponse.status).toBe(200)
+      const card = (await cardResponse.json()) as { provider: { url: string } }
+      expect(card.provider.url).toBe('https://agents.example.com/')
+    } finally {
+      await server.stop()
+    }
+  })
 })

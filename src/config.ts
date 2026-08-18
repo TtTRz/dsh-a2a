@@ -27,6 +27,10 @@ export interface ServerOptions {
   /** Per-turn deadline; a slow turn is cancelled so the next message is not stuck. */
   turnTimeoutMs?: number
   agentCard?: AgentCardOptions
+  /** Public base URL advertised on the Agent Card (e.g. behind a reverse proxy). */
+  publicUrl?: string
+  /** When set, every request must present `Authorization: Bearer <apiKey>`. */
+  apiKey?: string
 }
 
 export interface AgentEntry {
@@ -60,6 +64,8 @@ export const Config: z<Config> = z.object({
       description: z.string().default('A DeepSeek Harness agent exposed over the A2A protocol.'),
       version: z.string().default('0.1.0'),
     }),
+    publicUrl: z.string(),
+    apiKey: z.string(),
   }),
   agents: z
     .array(
@@ -80,6 +86,8 @@ export interface ResolvedServer {
   preset: string
   turnTimeoutMs: number
   agentCard: Required<AgentCardOptions>
+  publicUrl?: string
+  apiKey?: string
 }
 
 export interface ResolvedAgentEntry {
@@ -149,6 +157,18 @@ export function resolveConfig(input: Config): ResolvedConfig {
   }
   const host = server.host ?? '127.0.0.1'
   if (host.length === 0) throw new Error('dsh-a2a: server.host must not be empty')
+  const publicUrl = server.publicUrl?.trim()
+  if (publicUrl !== undefined && publicUrl.length > 0) {
+    try {
+      const parsed = new URL(publicUrl)
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+        throw new Error(`dsh-a2a: server.publicUrl must be http(s), got ${parsed.protocol}`)
+      }
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith('dsh-a2a:')) throw error
+      throw new Error(`dsh-a2a: server.publicUrl is not a valid URL: ${JSON.stringify(server.publicUrl)}`)
+    }
+  }
   return {
     server: {
       enabled: server.enabled !== false,
@@ -156,6 +176,8 @@ export function resolveConfig(input: Config): ResolvedConfig {
       port,
       preset: server.preset ?? 'standard',
       turnTimeoutMs,
+      publicUrl: publicUrl === '' ? undefined : publicUrl,
+      apiKey: server.apiKey,
       agentCard: {
         name: server.agentCard?.name ?? 'dsh-a2a',
         description:

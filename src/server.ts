@@ -77,8 +77,22 @@ export function buildAgentCard(config: ResolvedServer, baseUrl: string): AgentCa
       extensions: [],
       extendedAgentCard: false,
     },
-    securitySchemes: {},
-    securityRequirements: [],
+    securitySchemes:
+      config.apiKey === undefined
+        ? {}
+        : {
+            bearer: {
+              scheme: {
+                $case: 'httpAuthSecurityScheme',
+                value: {
+                  scheme: 'Bearer',
+                  description: 'Present the configured API key as a Bearer token.',
+                  bearerFormat: 'API key',
+                },
+              },
+            },
+          },
+    securityRequirements: config.apiKey === undefined ? [] : [{ schemes: { bearer: { list: [] } } }],
     defaultInputModes: ['text'],
     defaultOutputModes: ['text'],
     skills: [],
@@ -122,9 +136,13 @@ export class A2aServer {
   private readonly requestHandler: DefaultRequestHandler
   private boundUrl: string | undefined
 
-  /** The agent's base URL; the bound port once started (needed for port 0). */
+  /** The agent's base URL: the configured public URL, else the bound address. */
   get url(): string {
-    return this.boundUrl ?? `http://${this.options.config.host}:${this.options.config.port}/`
+    return (
+      this.options.config.publicUrl ??
+      this.boundUrl ??
+      `http://${this.options.config.host}:${this.options.config.port}/`
+    )
   }
 
   /** Bind the configured port; resolves once listening. */
@@ -162,7 +180,17 @@ export class A2aServer {
     this.options.onRequest?.(req)
     const url = new URL(req.url ?? '/', this.url)
     try {
-      if (req.method === 'GET' && url.pathname === `/${AGENT_CARD_PATH}`) {
+      // The Agent Card stays public for discovery; every other request must
+      // present the configured API key as a Bearer token (when one is set).
+      const isCard = req.method === 'GET' && url.pathname === `/${AGENT_CARD_PATH}`
+      if (!isCard && this.options.config.apiKey !== undefined) {
+        const expected = `Bearer ${this.options.config.apiKey}`
+        if (req.headers.authorization !== expected) {
+          sendJson(res, 401, { error: 'unauthorized' })
+          return
+        }
+      }
+      if (isCard) {
         sendJson(res, 200, await this.requestHandler.getAgentCard())
         return
       }
