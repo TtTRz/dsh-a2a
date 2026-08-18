@@ -22,6 +22,7 @@ import { DshAgentExecutor } from './executor.js'
 import { A2aServer } from './server.js'
 import { attachSettings } from './settings.js'
 import { A2aRegistry, a2aTools } from './tools.js'
+import { A2aTestService } from './typert.js'
 
 export const name = 'dsh-a2a'
 export const inject = ['agents', 'tools']
@@ -44,6 +45,8 @@ export { A2aRegistry, type A2aToolOptions, a2aTools } from './tools.js'
 
 /** Mount the A2A endpoint and the model-facing tools, tied to the Cordis lifecycle. */
 export function apply(ctx: Context, config: PluginConfig): void {
+  // Host-side Remote surface for the settings card's "test agent-card" button.
+  new A2aTestService(ctx)
   const resolved = resolveConfig(config)
   if (resolved.server.enabled) {
     const server = new A2aServer({

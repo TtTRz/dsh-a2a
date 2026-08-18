@@ -34,20 +34,19 @@ describe('card-state round trip', () => {
       name: '',
       url: 'nope',
       description: '',
-      headersText: 'bad line',
+      headers: [],
     })
     const { agents, issues } = draftToAgents(rows)
     expect(agents).toEqual([])
     expect(issues.map(({ field }) => field)).toContain('name')
     expect(issues.map(({ field }) => field)).toContain('url')
-    expect(issues.map(({ field }) => field)).toContain('headers')
   })
 
   it('flags duplicate names and drops empty rows', () => {
     const rows = [
-      { id: 1, name: 'x', url: 'https://x/', description: '', headersText: '' },
-      { id: 2, name: 'x', url: 'https://y/', description: '', headersText: '' },
-      { id: 3, name: '', url: '', description: '', headersText: '' },
+      { id: 1, name: 'x', url: 'https://x/', description: '', headers: [] },
+      { id: 2, name: 'x', url: 'https://y/', description: '', headers: [] },
+      { id: 3, name: '', url: '', description: '', headers: [] },
     ]
     const { agents, issues } = draftToAgents(rows)
     expect(agents).toEqual([{ name: 'x', url: 'https://x/', description: '' }])

@@ -29,6 +29,10 @@ export default defineConfig([
     dts: false,
     clean: false,
     sourcemap: false,
+    // react comes from the shell; zod must NOT — tsup externalizes package.json
+    // dependencies by default, and the shell's module table has no zod factory
+    // (a bare require("zod") in the served bundle kills the loader entry).
     external: ['react', 'react/jsx-runtime'],
+    noExternal: ['zod'],
   },
 ])
