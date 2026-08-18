@@ -14,7 +14,7 @@ import {
   type RequestContext,
 } from '@a2a-js/sdk/server'
 import { afterEach, describe, expect, it } from 'vitest'
-import { callAgent, resolveHeaders } from '../src/client.js'
+import { baseUrlOf, callAgent, resolveHeaders } from '../src/client.js'
 import { resolveConfig } from '../src/config.js'
 import { agentMessage, textOf } from '../src/executor.js'
 import { A2aServer } from '../src/server.js'
@@ -123,6 +123,29 @@ describe('resolveHeaders', () => {
     })
     // biome-ignore lint/suspicious/noTemplateCurlyInString: ${ENV} placeholder syntax is intentional
     expect(() => resolveHeaders({ authorization: 'Bearer ${NO_SUCH_VAR}' })).toThrow(/NO_SUCH_VAR/)
+  })
+})
+
+describe('baseUrlOf', () => {
+  it('keeps a bare base URL unchanged', () => {
+    expect(baseUrlOf('http://host:18878/')).toBe('http://host:18878')
+    expect(baseUrlOf('http://host:18878')).toBe('http://host:18878')
+    expect(baseUrlOf('http://host/base/')).toBe('http://host/base')
+  })
+
+  it('strips a full agent-card path down to the base', () => {
+    expect(baseUrlOf('http://host:18878/.well-known/agent-card.json')).toBe(
+      'http://host:18878',
+    )
+  })
+
+  it('strips any deeper .well-known path down to the base', () => {
+    expect(baseUrlOf('http://host:18878/.well-known/agent-card.json/')).toBe(
+      'http://host:18878',
+    )
+    expect(baseUrlOf('http://host/base/.well-known/agent-card.json')).toBe(
+      'http://host/base',
+    )
   })
 })
 

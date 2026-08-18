@@ -9,7 +9,7 @@
 
 import { randomUUID } from 'node:crypto'
 import type { SendMessageResult, Task } from '@a2a-js/sdk'
-import { Role } from '@a2a-js/sdk'
+import { Role, TaskState } from '@a2a-js/sdk'
 import {
   type AuthenticationHandler,
   ClientFactory,
@@ -55,6 +55,20 @@ export function textOfResult(result: SendMessageResult): string {
   return textOfParts(parts) || `task ended in state ${String(task.status?.state)}`
 }
 
+/**
+ * Normalize a registry URL to the agent BASE the SDK expects: the SDK
+ * appends `/.well-known/agent-card.json` itself, so an entry that already
+ * names the full agent-card path would otherwise double the segment.
+ */
+export function baseUrlOf(url: string): string {
+  const trimmed = url.trim().replace(/\/+$/, '')
+  const cardPath = '/.well-known/agent-card.json'
+  if (trimmed.endsWith(cardPath)) return trimmed.slice(0, -cardPath.length)
+  const wellKnown = trimmed.indexOf('/.well-known/')
+  if (wellKnown >= 0) return trimmed.slice(0, wellKnown)
+  return trimmed
+}
+
 function textOfParts(
   parts: ReadonlyArray<{ content?: { $case?: string; value?: unknown } }>,
 ): string {
@@ -90,7 +104,8 @@ export async function callAgent(
       ],
     }),
   )
-  const client = await factory.createFromUrl(entry.url)
+  const client = await factory.createFromUrl(baseUrlOf(entry.url))
+  const signal = AbortSignal.timeout(timeoutMillis)
   const result = await client.sendMessage(
     {
       tenant: '',
@@ -107,7 +122,19 @@ export async function callAgent(
       configuration: undefined,
       metadata: undefined,
     },
-    { signal: AbortSignal.timeout(timeoutMillis) },
+    { signal },
   )
-  return textOfResult(result)
+  // Synchronous agents answer with a Message; asynchronous ones return a Task
+  // that must be polled to a terminal state before its reply is readable.
+  if ('role' in result) return textOfResult(result)
+  let task = result
+  while (
+    task.status?.state === TaskState.TASK_STATE_SUBMITTED ||
+    task.status?.state === TaskState.TASK_STATE_WORKING
+  ) {
+    if (signal.aborted) throw new Error('dsh-a2a: timed out waiting for the remote task to finish')
+    await new Promise((resolve) => setTimeout(resolve, 1000))
+    task = await client.getTask({ id: task.id, tenant: '' }, { signal })
+  }
+  return textOfResult(task)
 }
