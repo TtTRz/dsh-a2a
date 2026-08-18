@@ -5,7 +5,7 @@
  */
 
 import type { Message } from '@a2a-js/sdk'
-import { Role as RoleEnum } from '@a2a-js/sdk'
+import { Role as RoleEnum, TaskState } from '@a2a-js/sdk'
 import { ClientFactory, ClientFactoryOptions } from '@a2a-js/sdk/client'
 import type { ExecutionEventBus } from '@a2a-js/sdk/server'
 import type { Context } from '@deepseek-ai/cordis'
@@ -152,8 +152,13 @@ describe('A2A server with a harness executor', () => {
         configuration: undefined,
         metadata: undefined,
       })
-      expect('role' in result && result.role === RoleEnum.ROLE_AGENT).toBe(true)
-      const reply = (result as Message).parts
+      // The reply rides on the terminal status update (the SDK ends the event
+      // stream at the first terminal event), so callers get a completed Task.
+      const task = result as unknown as {
+        status: { state: TaskState; message?: Message }
+      }
+      expect(task.status.state).toBe(TaskState.TASK_STATE_COMPLETED)
+      const reply = (task.status.message?.parts ?? [])
         .map((part) => (part.content?.$case === 'text' ? part.content.value : ''))
         .join('')
       expect(reply).toBe('pong')

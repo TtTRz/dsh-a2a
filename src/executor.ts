@@ -184,16 +184,18 @@ export class DshAgentExecutor implements AgentExecutor {
         turn.agent.cancel({ kind: 'user' })
         throw new Error(`dsh-a2a: turn exceeded ${this.options.turnTimeoutMs}ms and was cancelled`)
       }
-      eventBus.publish(
-        AgentEvent.message(
-          agentMessage(collectReplyText(turn.agent.session.events), taskId, contextId),
-        ),
-      )
+      // The SDK's execution queue ends the event stream at the first terminal
+      // statusUpdate (or at a `message` event), so the reply must ride ON the
+      // terminal status: publishing a separate message first would strand the
+      // task in WORKING forever in the task store.
       eventBus.publish(
         AgentEvent.statusUpdate({
           taskId,
           contextId,
-          status: status(TaskStateEnum.TASK_STATE_COMPLETED),
+          status: status(
+            TaskStateEnum.TASK_STATE_COMPLETED,
+            agentMessage(collectReplyText(turn.agent.session.events), taskId, contextId),
+          ),
           metadata: {},
         }),
       )
