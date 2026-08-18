@@ -12,6 +12,12 @@
           enabled: !!js process.env.A2A_ENABLED !== '0'
           host: !!js process.env.A2A_HOST ?? '127.0.0.1'
           port: !!js (Number(process.env.A2A_PORT) || 8899)
+          # Public URL announced in the Agent Card (set A2A_PUBLIC_URL when
+          # fronted by a reverse proxy; falls back to the bound address).
+          publicUrl: !!js process.env.A2A_PUBLIC_URL
+          # When set, every request except the Agent Card must carry
+          # `Authorization: Bearer <A2A_API_KEY>`.
+          apiKey: !!js process.env.A2A_API_KEY
           preset: standard
           turnTimeoutMs: 300000
           agentCard:
