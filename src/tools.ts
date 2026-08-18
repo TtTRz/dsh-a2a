@@ -24,6 +24,12 @@ export class A2aRegistry {
   get(name: string): ResolvedAgentEntry | undefined {
     return this.byName.get(name)
   }
+
+  /** Hot-swap the whole registry; settings commits land here without a restart. */
+  update(entries: readonly ResolvedAgentEntry[]): void {
+    this.byName.clear()
+    for (const entry of entries) this.byName.set(entry.name, entry)
+  }
 }
 
 export interface A2aToolOptions {

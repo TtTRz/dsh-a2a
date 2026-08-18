@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-18
+
+### Added
+
+- GUI-editable registry: the `a2a` settings namespace (schema defaults → the cordis row's `agents` as composition base → the user document) with a Plugins-section card (`settings.plugin.item`) for adding / editing / removing remote agents. A save hot-reloads the running `a2a_call` / `a2a_list` tools — no restart; a reset re-inherits the deployment registry. Profiles without the settings service keep the static v0.1 behavior.
+- Browser half shipped as the closure-factory `./client` bundle (`dsh.client` declaration); invalid settings rows are dropped with a warning instead of failing the document (`normalizeAgents`).
+
 ## [0.1.0] - 2026-08-15
 
 ### Added

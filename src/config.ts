@@ -94,6 +94,46 @@ export interface ResolvedConfig {
   agents: ResolvedAgentEntry[]
 }
 
+/**
+ * Lenient runtime normalization for settings-fed registries: rows the strict
+ * load-time checks would reject are dropped instead of failing the whole
+ * document, so one bad hand edit can never take the tools down.
+ */
+export function normalizeAgents(entries: readonly unknown[]): {
+  agents: ResolvedAgentEntry[]
+  rejected: number
+} {
+  const agents: ResolvedAgentEntry[] = []
+  let rejected = 0
+  for (const raw of entries) {
+    if (typeof raw !== 'object' || raw === null) {
+      rejected += 1
+      continue
+    }
+    const entry = raw as AgentEntry
+    const name = (entry.name ?? '').trim()
+    let ok = name.length > 0 && typeof entry.url === 'string' && entry.url.length > 0
+    if (ok) {
+      try {
+        const parsed = new URL(entry.url)
+        ok = parsed.protocol === 'http:' || parsed.protocol === 'https:'
+      } catch {
+        ok = false
+      }
+    }
+    if (!ok) {
+      rejected += 1
+      continue
+    }
+    const headers: Record<string, string> = {}
+    for (const [key, value] of Object.entries(entry.headers ?? {})) {
+      if (typeof value === 'string') headers[key] = value
+    }
+    agents.push({ name, url: entry.url, headers, description: entry.description ?? '' })
+  }
+  return { agents, rejected }
+}
+
 /** Validate and normalize the raw config; throws with field-naming messages. */
 export function resolveConfig(input: Config): ResolvedConfig {
   const server = input.server ?? {}

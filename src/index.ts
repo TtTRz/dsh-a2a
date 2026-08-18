@@ -20,6 +20,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { type Config as PluginConfig, resolveConfig } from './config.js'
 import { DshAgentExecutor } from './executor.js'
 import { A2aServer } from './server.js'
+import { attachSettings } from './settings.js'
 import { A2aRegistry, a2aTools } from './tools.js'
 
 export const name = 'dsh-a2a'
@@ -35,9 +36,10 @@ export type {
   ResolvedServer,
   ServerOptions,
 } from './config.js'
-export { Config, resolveConfig } from './config.js'
+export { Config, normalizeAgents, resolveConfig } from './config.js'
 export { collectReplyText, DshAgentExecutor, sessionIdFor, textOf } from './executor.js'
 export { A2aServer, type A2aServerOptions, buildAgentCard, type RequestObserver } from './server.js'
+export { A2aSettings, attachSettings, SETTINGS_NAMESPACE } from './settings.js'
 export { A2aRegistry, type A2aToolOptions, a2aTools } from './tools.js'
 
 /** Mount the A2A endpoint and the model-facing tools, tied to the Cordis lifecycle. */
@@ -61,7 +63,11 @@ export function apply(ctx: Context, config: PluginConfig): void {
       }
     }, 'dsh-a2a.server')
   }
-  const tools = a2aTools(new A2aRegistry(resolved.agents))
+  const registry = new A2aRegistry(resolved.agents)
+  const tools = a2aTools(registry)
   ctx.effect(() => ctx.tools.register(tools.list), 'dsh-a2a.a2a_list')
   ctx.effect(() => ctx.tools.register(tools.call), 'dsh-a2a.a2a_call')
+  // The GUI registry: settings commits (Plugins → A2A card) hot-reload the
+  // tools above; profiles without a settings service keep the static registry.
+  attachSettings(ctx, { agents: resolved.agents }, (agents) => registry.update(agents))
 }

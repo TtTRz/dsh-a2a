@@ -16,6 +16,7 @@
     "noFallthroughCasesInSwitch": true,
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
+    "jsx": "react-jsx",
     "noEmit": true
   },
   "include": ["src", "test"]

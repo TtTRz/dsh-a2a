@@ -92,9 +92,9 @@ The mounted row lives in `~/.dsh/profiles/web/cordis.patch.yml`:
 
 ## ⚠️ Limitations
 
-- Inbound authentication is delegated to the deployment (put the port behind the Taihu gateway or a reverse proxy); the Agent Card advertises no security schemes in v0.1.
+- Inbound authentication is delegated to the deployment (put the port behind an authenticating gateway or a reverse proxy); the Agent Card advertises no security schemes in v0.1.
 - One executor instance serves every context; sessions resume across turns but a dsh restart creates fresh in-memory state (session persistence via `sessionPersistence` is a planned follow-up).
-- Outbound registry edits require a profile patch + restart (settings-backed CRUD is a planned follow-up).
+- ~~Outbound registry edits require a profile patch + restart~~ **0.2.0: GUI-configurable.** The Plugins → Plugin configuration section ships an "A2A remote agents" card over the `a2a` settings namespace (schema defaults → row-config base → user overrides); a save hot-reloads the running tools, and a reset re-inherits the deployment registry.
 
 ## 🧪 Development
 

@@ -92,9 +92,9 @@ curl -s http://127.0.0.1:8899/ -H 'Content-Type: application/json' \
 
 ## ⚠️ 限制
 
-- 入站鉴权交给部署层（把端口放到太湖网关或反代后面）；v0.1 的 Agent Card 不声明任何 security scheme
+- 入站鉴权交给部署层（把端口放到鉴权网关或反代后面）；v0.1 的 Agent Card 不声明任何 security scheme
 - 单个 executor 实例服务所有 context；跨轮次延续会话，但 dsh 重启后内存态重建（`sessionPersistence` 持久化是规划中的后续）
-- 出站注册表改动需要改 profile patch 并重启（settings 化 CRUD 是规划中的后续）
+- **0.2.0 起注册表支持 GUI 配置**：设置 → 插件 → 插件配置里的「A2A 远程 agent」卡片可直接增删改注册表，保存即热更新 `a2a_call` / `a2a_list`，无需重启；重置则恢复部署默认（cordis 行配置）。配置落在 settings 文档的 `a2a` 命名空间，解析层级为 schema 默认值 → 行配置 base → 用户覆盖
 
 ## 🧪 开发
 
