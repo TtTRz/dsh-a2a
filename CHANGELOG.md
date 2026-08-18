@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-08-18
+
+### Changed
+
+- Exclude the tsup CJS intermediate (`dist/client.cjs`) from the published tarball; only the wrapped `dist/client.js` entry ships.
+- Unit-test the `attachSettings` wiring (namespace registration, initial feed, hot-reload on commit, invalid-row drop + warning).
+
 ## [0.2.0] - 2026-08-18
 
 ### Added
