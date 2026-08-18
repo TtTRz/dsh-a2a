@@ -11,6 +11,7 @@
  */
 
 import { createHash, randomUUID } from 'node:crypto'
+import { mkdir } from 'node:fs/promises'
 import type { Message, Part, Task, TaskState } from '@a2a-js/sdk'
 import { Role as RoleEnum, TaskState as TaskStateEnum } from '@a2a-js/sdk'
 import {
@@ -20,7 +21,7 @@ import {
   type RequestContext,
 } from '@a2a-js/sdk/server'
 import type { Context } from '@deepseek-ai/cordis'
-import type { Agent } from '@deepseek-ai/dsh-agent'
+import { type Agent, installModelSelection } from '@deepseek-ai/dsh-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import { SessionId } from '@deepseek-ai/dsh-session'
@@ -30,6 +31,26 @@ export interface ExecutorOptions {
   preset: string
   /** Per-turn deadline; a slow turn is cancelled instead of left running. */
   turnTimeoutMs: number
+  /** Working directory for A2A conversation agents; doubles as the sidebar workspace path. */
+  cwd?: string
+  /** Sidebar workspace title grouping A2A conversations. */
+  workspaceTitle?: string
+  /** Explicit model route; falls back to the harness default model. */
+  provider?: string
+  model?: string
+}
+
+interface WorkspaceRegistry {
+  create(path: string, title: string): Promise<Workspace>
+}
+
+interface Workspace {
+  attachSession(sessionId: string): Promise<void>
+}
+
+interface ModelSelection {
+  provider: string
+  model: string
 }
 
 interface RunningTurn {
@@ -121,6 +142,7 @@ function status(
 export class DshAgentExecutor implements AgentExecutor {
   private readonly running = new Map<string, RunningTurn>()
   private presetPromise?: Promise<string>
+  private workspacePromise?: Promise<Workspace | undefined>
 
   constructor(
     private readonly ctx: Context,
@@ -210,7 +232,14 @@ export class DshAgentExecutor implements AgentExecutor {
   private async openTurn(sessionId: SessionId, contextId: string): Promise<RunningTurn> {
     const live = this.ctx.agents.get(sessionId)
     if (live !== undefined) {
+      void this.attachToWorkspace(String(sessionId))
       return { agent: live, dispose: async () => undefined, sessionId, contextId }
+    }
+    const selection = this.modelSelection()
+    if (selection === undefined) {
+      throw new Error(
+        'dsh-a2a: no model route for A2A agents; set server.provider/server.model or the default model',
+      )
     }
     // Presets are an optional capability: profiles without an agent-presets
     // service get plain agents (the harness default model) instead.
@@ -220,18 +249,83 @@ export class DshAgentExecutor implements AgentExecutor {
           mount(agentCtx: Context, id: string): Promise<void>
         }
       | undefined
-    if (presets === undefined) {
-      const handle = await this.ctx.agents.create({ sessionId })
-      return { agent: handle.agent, dispose: handle.dispose, sessionId, contextId }
-    }
-    const presetId = await this.resolvePreset(presets)
+    const presetId = presets === undefined ? undefined : await this.resolvePreset(presets)
+    const cwd = this.options.cwd ?? process.cwd()
+    await mkdir(cwd, { recursive: true })
     const handle = await this.ctx.agents.create({
       sessionId,
+      meta: { cwd, ...(presetId === undefined ? {} : { agentPreset: presetId }) },
+      agentOptions: { provider: selection.provider, model: selection.model },
       setup: async (agentCtx: Context) => {
-        await presets.mount(agentCtx, presetId)
+        if (presets !== undefined && presetId !== undefined) {
+          await presets.mount(agentCtx, presetId)
+        }
+        installModelSelection(agentCtx, { current: selection, assembled: undefined })
       },
     })
+    void this.attachToWorkspace(String(sessionId))
     return { agent: handle.agent, dispose: handle.dispose, sessionId, contextId }
+  }
+
+  /** Resolve the model route for new agents: explicit config, then the harness default. */
+  private modelSelection(): ModelSelection | undefined {
+    if (this.options.provider !== undefined && this.options.model !== undefined) {
+      return { provider: this.options.provider, model: this.options.model }
+    }
+    const defaults = this.ctx.get('agentDefaultModel') as
+      | { currentSelection(): { provider?: string; model?: string } | undefined }
+      | undefined
+    const selection = defaults?.currentSelection()
+    if (selection?.provider !== undefined && selection.model !== undefined) {
+      return { provider: selection.provider, model: selection.model }
+    }
+    return undefined
+  }
+
+  /**
+   * Best-effort attach of one A2A session to the "A2A" sidebar workspace.
+   * A session whose grouping fails must never fail the message itself.
+   */
+  async attachToWorkspace(sessionId: string): Promise<void> {
+    try {
+      const workspace = await this.ensureWorkspace()
+      await workspace?.attachSession(sessionId)
+    } catch (error) {
+      this.ctx.logger.warn(`dsh-a2a: workspace attach failed for ${sessionId}: ${String(error)}`)
+    }
+  }
+
+  /**
+   * Resolve the grouping workspace once. Failures (including a not-yet-mounted
+   * registry) are forgotten so the next call retries instead of caching the
+   * miss forever.
+   */
+  private ensureWorkspace(): Promise<Workspace | undefined> {
+    if (this.workspacePromise !== undefined) return this.workspacePromise
+    const current = this.openWorkspace().then(
+      (workspace) => {
+        if (workspace === undefined) this.forgetWorkspace(current)
+        return workspace
+      },
+      (error) => {
+        this.forgetWorkspace(current)
+        throw error
+      },
+    )
+    this.workspacePromise = current
+    return current
+  }
+
+  private forgetWorkspace(current: Promise<Workspace | undefined>): void {
+    if (this.workspacePromise === current) this.workspacePromise = undefined
+  }
+
+  private async openWorkspace(): Promise<Workspace | undefined> {
+    const registry = this.ctx.get('workspaceRegistry') as WorkspaceRegistry | undefined
+    if (registry === undefined) return undefined
+    const cwd = this.options.cwd ?? process.cwd()
+    await mkdir(cwd, { recursive: true })
+    return registry.create(cwd, this.options.workspaceTitle ?? 'A2A')
   }
 
   private resolvePreset(presets: {

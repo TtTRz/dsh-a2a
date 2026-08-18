@@ -6,6 +6,8 @@
  * @module dsh-a2a/config
  */
 
+import { homedir } from 'node:os'
+import { isAbsolute, join } from 'node:path'
 import z from '@deepseek-ai/schemastery'
 
 export interface AgentCardOptions {
@@ -31,6 +33,14 @@ export interface ServerOptions {
   publicUrl?: string
   /** When set, every request must present `Authorization: Bearer <apiKey>`. */
   apiKey?: string
+  /** Model route for A2A conversation agents (falls back to the harness default model). */
+  provider?: string
+  /** Model name paired with `provider` (falls back to the harness default model). */
+  model?: string
+  /** Working directory for A2A conversation agents; doubles as the sidebar workspace path. */
+  cwd?: string
+  /** Sidebar workspace title grouping A2A conversations (defaults to "A2A"). */
+  workspaceTitle?: string
 }
 
 export interface AgentEntry {
@@ -66,6 +76,10 @@ export const Config: z<Config> = z.object({
     }),
     publicUrl: z.string(),
     apiKey: z.string(),
+    provider: z.string(),
+    model: z.string(),
+    cwd: z.string(),
+    workspaceTitle: z.string().default('A2A'),
   }),
   agents: z
     .array(
@@ -88,6 +102,10 @@ export interface ResolvedServer {
   agentCard: Required<AgentCardOptions>
   publicUrl?: string
   apiKey?: string
+  provider?: string
+  model?: string
+  cwd: string
+  workspaceTitle: string
 }
 
 export interface ResolvedAgentEntry {
@@ -166,9 +184,23 @@ export function resolveConfig(input: Config): ResolvedConfig {
       }
     } catch (error) {
       if (error instanceof Error && error.message.startsWith('dsh-a2a:')) throw error
-      throw new Error(`dsh-a2a: server.publicUrl is not a valid URL: ${JSON.stringify(server.publicUrl)}`)
+      throw new Error(
+        `dsh-a2a: server.publicUrl is not a valid URL: ${JSON.stringify(server.publicUrl)}`,
+      )
     }
   }
+  const provider = server.provider?.trim() || undefined
+  const model = server.model?.trim() || undefined
+  if ((provider === undefined) !== (model === undefined)) {
+    throw new Error('dsh-a2a: server.provider and server.model must be set together')
+  }
+  const cwd = server.cwd?.trim() || process.env.DSH_A2A_CWD || join(homedir(), '.a2a-sessions')
+  if (!isAbsolute(cwd)) {
+    throw new Error(
+      `dsh-a2a: server.cwd must be an absolute path, got ${JSON.stringify(server.cwd)}`,
+    )
+  }
+  const workspaceTitle = server.workspaceTitle?.trim() || 'A2A'
   return {
     server: {
       enabled: server.enabled !== false,
@@ -178,6 +210,10 @@ export function resolveConfig(input: Config): ResolvedConfig {
       turnTimeoutMs,
       publicUrl: publicUrl === '' ? undefined : publicUrl,
       apiKey: server.apiKey,
+      provider,
+      model,
+      cwd,
+      workspaceTitle,
       agentCard: {
         name: server.agentCard?.name ?? 'dsh-a2a',
         description:
