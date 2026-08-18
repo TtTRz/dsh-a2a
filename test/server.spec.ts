@@ -69,11 +69,22 @@ interface CreateCall {
 
 function fakeCtx(agents: Map<string, FakeAgent> = new Map()): Context {
   const ctx = {
-    get: () => undefined,
+    get: (name: string) => {
+      if (name === 'agentDefaultModel') {
+        return { currentSelection: () => ({ provider: 'test-provider', model: 'test-model' }) }
+      }
+      if (name === 'agentPresets') {
+        return { resolve: async () => ({ id: 'standard' }), mount: async () => undefined }
+      }
+      return undefined
+    },
     agents: {
       get: (id: string) => agents.get(id),
       create: async ({ sessionId, setup }: CreateCall) => {
-        await setup?.({ agentPresets: { mount: async () => undefined } } as unknown as Context)
+        await setup?.({
+          agentPresets: { mount: async () => undefined },
+          on: () => () => undefined,
+        } as unknown as Context)
         const agent = new FakeAgent()
         agents.set(sessionId, agent)
         return { agent, dispose: async () => undefined }
@@ -250,7 +261,9 @@ describe('A2A server with a harness executor', () => {
       expect('bearer' in card.securitySchemes).toBe(true)
       expect(card.securityRequirements.length).toBeGreaterThan(0)
 
-      const body = JSON.stringify({ message: { role: 'user', parts: [{ type: 'text', text: 'hi' }] } })
+      const body = JSON.stringify({
+        message: { role: 'user', parts: [{ type: 'text', text: 'hi' }] },
+      })
       // No credentials → 401.
       const noAuth = await fetch(`${server.url}message:send`, {
         method: 'POST',
@@ -296,5 +309,56 @@ describe('A2A server with a harness executor', () => {
     } finally {
       await server.stop()
     }
+  })
+
+  it('creates A2A agents with a model route and the A2A workspace metadata', async () => {
+    const agents = new Map<string, FakeAgent>()
+    const ctx = fakeCtx(agents)
+    const creates: Array<{ meta?: unknown; agentOptions?: unknown }> = []
+    ;(
+      ctx as unknown as {
+        agents: {
+          create: (options: {
+            meta?: unknown
+            agentOptions?: unknown
+          }) => Promise<{ agent: FakeAgent; dispose: () => Promise<void> }>
+        }
+      }
+    ).agents.create = async (options) => {
+      creates.push(options)
+      const agent = new FakeAgent()
+      return { agent, dispose: async () => undefined }
+    }
+    const executor = new DshAgentExecutor(ctx, {
+      preset: 'standard',
+      turnTimeoutMs: 10_000,
+      cwd: '/tmp/a2a-ws-test',
+      workspaceTitle: 'A2A',
+    })
+    const { bus } = collectingBus()
+    await executor.execute(
+      {
+        taskId: 'task-1',
+        contextId: 'ctx-1',
+        context: {},
+        userMessage: userMessage('hello'),
+        request: {
+          tenant: '',
+          message: userMessage('hello'),
+          configuration: undefined,
+          metadata: undefined,
+        },
+      } as never,
+      bus,
+    )
+    expect(creates[0]?.agentOptions).toEqual({ provider: 'test-provider', model: 'test-model' })
+    expect(creates[0]?.meta).toMatchObject({ cwd: '/tmp/a2a-ws-test', agentPreset: 'standard' })
+  })
+
+  it('validates the A2A workspace defaults and the provider/model pair', () => {
+    const defaults = resolveConfig({ server: { host: '127.0.0.1' } })
+    expect(defaults.server.workspaceTitle).toBe('A2A')
+    expect(defaults.server.cwd.length).toBeGreaterThan(0)
+    expect(() => resolveConfig({ server: { provider: 'venus' } })).toThrow(/together/)
   })
 })

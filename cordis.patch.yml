@@ -18,6 +18,14 @@
           # When set, every request except the Agent Card must carry
           # `Authorization: Bearer <A2A_API_KEY>`.
           apiKey: !!js process.env.A2A_API_KEY
+          # Model route for A2A conversations (defaults to the harness
+          # default model); must be set as a provider/model pair.
+          provider: !!js process.env.A2A_PROVIDER
+          model: !!js process.env.A2A_MODEL
+          # Dedicated workspace directory: A2A conversations appear under the
+          # "A2A" group in the sidebar (defaults to ~/.a2a-sessions).
+          cwd: !!js process.env.DSH_A2A_CWD
+          workspaceTitle: A2A
           preset: standard
           turnTimeoutMs: 300000
           agentCard:

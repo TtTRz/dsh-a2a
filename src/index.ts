@@ -49,12 +49,17 @@ export function apply(ctx: Context, config: PluginConfig): void {
   new A2aTestService(ctx)
   const resolved = resolveConfig(config)
   if (resolved.server.enabled) {
+    const executor = new DshAgentExecutor(ctx, {
+      preset: resolved.server.preset,
+      turnTimeoutMs: resolved.server.turnTimeoutMs,
+      cwd: resolved.server.cwd,
+      workspaceTitle: resolved.server.workspaceTitle,
+      provider: resolved.server.provider,
+      model: resolved.server.model,
+    })
     const server = new A2aServer({
       config: resolved.server,
-      executor: new DshAgentExecutor(ctx, {
-        preset: resolved.server.preset,
-        turnTimeoutMs: resolved.server.turnTimeoutMs,
-      }),
+      executor,
     })
     ctx.effect(() => {
       const running = server.start().catch((error: unknown) => {
@@ -65,6 +70,9 @@ export function apply(ctx: Context, config: PluginConfig): void {
         await server.stop()
       }
     }, 'dsh-a2a.server')
+    // Best-effort: after a restart, re-attach persisted a2a- conversations to
+    // the "A2A" workspace (the registry may mount after this row activates).
+    void reattachPersisted(ctx, executor)
   }
   const registry = new A2aRegistry(resolved.agents)
   const tools = a2aTools(registry)
@@ -73,4 +81,27 @@ export function apply(ctx: Context, config: PluginConfig): void {
   // The GUI registry: settings commits (Plugins → A2A card) hot-reload the
   // tools above; profiles without a settings service keep the static registry.
   attachSettings(ctx, { agents: resolved.agents }, (agents) => registry.update(agents))
+}
+
+/** Re-attach persisted `a2a-*` conversations to the grouping workspace. */
+async function reattachPersisted(ctx: Context, executor: DshAgentExecutor): Promise<void> {
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const persistence = ctx.get('sessionPersistence') as
+      | { list(): Promise<readonly { id: unknown }[]> }
+      | undefined
+    if (persistence === undefined) {
+      await new Promise((resolve) => setTimeout(resolve, 250))
+      continue
+    }
+    try {
+      const headers = await persistence.list()
+      for (const header of headers) {
+        const id = String(header.id)
+        if (id.startsWith('a2a-')) await executor.attachToWorkspace(id)
+      }
+    } catch (error) {
+      ctx.logger.warn(`dsh-a2a: failed to re-attach persisted sessions: ${String(error)}`)
+    }
+    return
+  }
 }
