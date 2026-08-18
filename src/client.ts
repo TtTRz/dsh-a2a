@@ -51,8 +51,13 @@ function staticHeaders(headers: Record<string, string>): AuthenticationHandler {
 export function textOfResult(result: SendMessageResult): string {
   if ('role' in result) return textOfParts(result.parts ?? [])
   const task = result as Task
-  const parts = (task.artifacts ?? []).flatMap((artifact) => artifact.parts ?? [])
-  return textOfParts(parts) || `task ended in state ${String(task.status?.state)}`
+  const statusParts = task.status?.message?.parts ?? []
+  const artifactParts = (task.artifacts ?? []).flatMap((artifact) => artifact.parts ?? [])
+  return (
+    textOfParts(statusParts) ||
+    textOfParts(artifactParts) ||
+    `task ended in state ${String(task.status?.state)}`
+  )
 }
 
 /**

@@ -14,7 +14,7 @@ import {
   type RequestContext,
 } from '@a2a-js/sdk/server'
 import { afterEach, describe, expect, it } from 'vitest'
-import { baseUrlOf, callAgent, resolveHeaders } from '../src/client.js'
+import { baseUrlOf, callAgent, resolveHeaders, textOfResult } from '../src/client.js'
 import { resolveConfig } from '../src/config.js'
 import { agentMessage, textOf } from '../src/executor.js'
 import { A2aServer } from '../src/server.js'
@@ -134,18 +134,41 @@ describe('baseUrlOf', () => {
   })
 
   it('strips a full agent-card path down to the base', () => {
-    expect(baseUrlOf('http://host:18878/.well-known/agent-card.json')).toBe(
-      'http://host:18878',
-    )
+    expect(baseUrlOf('http://host:18878/.well-known/agent-card.json')).toBe('http://host:18878')
   })
 
   it('strips any deeper .well-known path down to the base', () => {
-    expect(baseUrlOf('http://host:18878/.well-known/agent-card.json/')).toBe(
-      'http://host:18878',
-    )
-    expect(baseUrlOf('http://host/base/.well-known/agent-card.json')).toBe(
-      'http://host/base',
-    )
+    expect(baseUrlOf('http://host:18878/.well-known/agent-card.json/')).toBe('http://host:18878')
+    expect(baseUrlOf('http://host/base/.well-known/agent-card.json')).toBe('http://host/base')
+  })
+})
+
+describe('textOfResult', () => {
+  it('reads the reply from the terminal status message of a completed task', () => {
+    const task = {
+      id: 't-1',
+      contextId: 'c-1',
+      status: {
+        state: TaskStateEnum.TASK_STATE_COMPLETED,
+        timestamp: new Date().toISOString(),
+        message: {
+          role: 'agent',
+          parts: [{ content: { $case: 'text', value: '全部查完了，结论如下' } }],
+        },
+      },
+      artifacts: [],
+    } as unknown as Task
+    expect(textOfResult(task)).toBe('全部查完了，结论如下')
+  })
+
+  it('falls back to the task state when no reply text is present', () => {
+    const task = {
+      id: 't-1',
+      contextId: 'c-1',
+      status: { state: TaskStateEnum.TASK_STATE_WORKING, timestamp: new Date().toISOString() },
+      artifacts: [],
+    } as unknown as Task
+    expect(textOfResult(task)).toBe('task ended in state 2')
   })
 })
 
