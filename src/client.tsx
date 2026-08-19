@@ -1356,10 +1356,6 @@ function ServerInfoPanel(props: { remote: RemoteLike; scope: ScopeLike }): React
             )}
             {row(t.inboundPreset, info.preset)}
             {row(t.inboundWorkspace, info.workspaceTitle)}
-            {row(
-              t.inboundIdentity,
-              `${info.agentCard.name}${info.agentCard.version ? ` v${info.agentCard.version}` : ''}${info.agentCard.description ? ` — ${info.agentCard.description}` : ''}`,
-            )}
           </div>
           {cardUrl !== undefined ? (
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
@@ -1481,6 +1477,18 @@ function ServerInfoPanel(props: { remote: RemoteLike; scope: ScopeLike }): React
                       style={{ fontSize: '12px', fontWeight: 600, color: cssVars.labelPrimary }}
                     >
                       {t.inboundIdentity}
+                      {info.agentCard.version ? (
+                        <span
+                          style={{
+                            marginLeft: '6px',
+                            fontWeight: 400,
+                            fontSize: '11px',
+                            color: cssVars.labelTertiary,
+                          }}
+                        >
+                          v{info.agentCard.version}
+                        </span>
+                      ) : null}
                     </span>
                     <Button variant="ghost" size="sm" onClick={() => setEditingIdentity(true)}>
                       {t.identityEdit}
