@@ -19,11 +19,7 @@
  * @module dsh-a2a/client
  */
 
-import {
-  Button,
-  IconChevronDownOutline14,
-  IconQuestionOutline14,
-} from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, IconQuestionOutline14 } from '@deepseek-ai/dsh-client-ui-primitives'
 import {
   type ReactNode,
   useCallback,
@@ -331,7 +327,6 @@ function A2aCard(props: { scope: ScopeLike; remote?: RemoteLike }): ReactNode {
   const [rows, setRows] = useState<DraftRow[]>(() => rowsFromAgents(stored))
   const [saving, setSaving] = useState(false)
   const [saveFailed, setSaveFailed] = useState(false)
-  const [open, setOpen] = useState(true)
   /** The row whose edit form is expanded; null = all rows show summaries. */
   const [editingRow, setEditingRow] = useState<number | null>(null)
   const seeded = useRef(stored)
@@ -553,604 +548,529 @@ function A2aCard(props: { scope: ScopeLike; remote?: RemoteLike }): ReactNode {
   return (
     <section
       style={{
-        border: `1px solid ${cssVars.borderL2}`,
-        background: cssVars.bgLayer3,
-        borderRadius: '12px',
+        border: `1px solid ${cssVars.borderL1}`,
+        borderRadius: '10px',
+        padding: '14px 16px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '4px',
       }}
     >
-      <button
-        type="button"
-        onClick={() => setOpen((value) => !value)}
-        aria-expanded={open}
-        style={{
-          appearance: 'none',
-          width: '100%',
-          font: 'inherit',
-          color: 'inherit',
-          textAlign: 'left',
-          cursor: 'pointer',
-          background: 'transparent',
-          border: 0,
-          borderRadius: '12px',
-          alignItems: 'center',
-          gap: '12px',
-          padding: '14px 16px',
-          display: 'flex',
-        }}
-      >
-        <span
-          style={{ flexDirection: 'column', flex: '1', gap: '4px', minWidth: 0, display: 'flex' }}
-        >
-          <span
-            style={{
-              color: cssVars.labelPrimary,
-              fontSize: '15px',
-              fontWeight: 600,
-              lineHeight: 1.4,
-            }}
-          >
-            {t.title}
-          </span>
-          <span style={{ color: cssVars.labelTertiary, fontSize: '13px', lineHeight: 1.5 }}>
-            {t.description}
-          </span>
-        </span>
-        {dirty ? (
-          <span
-            style={{
-              whiteSpace: 'nowrap',
-              background: cssVars.bgModulePlatform,
-              color: cssVars.labelSecondary,
-              borderRadius: '999px',
-              flex: 'none',
-              padding: '1px 8px',
-              fontSize: '11px',
-              fontWeight: 500,
-              lineHeight: '17px',
-            }}
-          >
-            {t.unsaved}
-          </span>
-        ) : null}
-        <IconChevronDownOutline14
+      {disabled ? (
+        <p
+          role="status"
           style={{
             color: cssVars.labelTertiary,
-            flex: 'none',
-            transition: 'transform .16s',
-            transform: open ? 'rotate(180deg)' : undefined,
-          }}
-        />
-      </button>
-
-      {open ? (
-        <div
-          style={{
-            borderTop: `1px solid ${cssVars.borderL2}`,
-            margin: '0 16px',
-            paddingBottom: '12px',
+            margin: '12px 0 0',
+            fontSize: '12px',
+            lineHeight: 1.5,
           }}
         >
-          {disabled ? (
-            <p
-              role="status"
-              style={{
-                color: cssVars.labelTertiary,
-                margin: '12px 0 0',
-                fontSize: '12px',
-                lineHeight: 1.5,
-              }}
-            >
-              {t.readonly}
-            </p>
-          ) : null}
+          {t.readonly}
+        </p>
+      ) : null}
 
-          {rows.length === 0 ? (
-            <p style={{ color: cssVars.labelTertiary, margin: '12px 0 0', fontSize: '13px' }}>
-              {t.empty}
-            </p>
-          ) : null}
+      {rows.length === 0 ? (
+        <p style={{ color: cssVars.labelTertiary, margin: '12px 0 0', fontSize: '13px' }}>
+          {t.empty}
+        </p>
+      ) : null}
 
-          {rows.map((row, index) => {
-            const probe = probes.get(row.id)
-            const rowShell = {
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '10px',
-              marginTop: index === 0 ? '4px' : '0',
-              padding: '14px 0',
-              borderTop: index === 0 ? undefined : `1px solid ${cssVars.borderL1}`,
-            } as const
+      {rows.map((row, index) => {
+        const probe = probes.get(row.id)
+        const rowShell = {
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '10px',
+          marginTop: index === 0 ? '8px' : '0',
+          padding: '10px 0',
+          borderTop: index === 0 ? undefined : `1px solid ${cssVars.borderL2}`,
+        } as const
 
-            // ---- Summary view: read-only row with badge + actions. ----
-            if (editingRow !== row.id) {
-              const badge =
-                probe === undefined
-                  ? { text: t.unverifiedBadge, color: cssVars.labelTertiary }
-                  : probe.status === 'testing'
-                    ? { text: t.testingBadge, color: cssVars.labelSecondary }
-                    : probe.status === 'ok'
-                      ? { text: t.verifiedBadge, color: cssVars.brand }
-                      : { text: t.failedBadge, color: cssVars.labelError }
-              const name = row.name.trim()
-              const url = row.url.trim()
-              const description = row.description.trim()
-              const remoteLine =
-                probe?.status === 'ok' &&
-                (probe.remoteName !== undefined || probe.remoteDescription !== undefined)
-                  ? `${probe.remoteName ?? t.remoteNoName}${probe.remoteDescription ? ` — ${probe.remoteDescription}` : ''}`
-                  : null
-              return (
-                <div key={row.id} style={rowShell}>
-                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
+        // ---- Summary view: read-only row with badge + actions. ----
+        if (editingRow !== row.id) {
+          const badge =
+            probe === undefined
+              ? { text: t.unverifiedBadge, color: cssVars.labelTertiary }
+              : probe.status === 'testing'
+                ? { text: t.testingBadge, color: cssVars.labelSecondary }
+                : probe.status === 'ok'
+                  ? { text: t.verifiedBadge, color: cssVars.brand }
+                  : { text: t.failedBadge, color: cssVars.labelError }
+          const name = row.name.trim()
+          const url = row.url.trim()
+          const description = row.description.trim()
+          const remoteLine =
+            probe?.status === 'ok' &&
+            (probe.remoteName !== undefined || probe.remoteDescription !== undefined)
+              ? `${probe.remoteName ?? t.remoteNoName}${probe.remoteDescription ? ` — ${probe.remoteDescription}` : ''}`
+              : null
+          return (
+            <div key={row.id} style={rowShell}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
+                <span
+                  style={{
+                    flex: 'none',
+                    marginTop: '1px',
+                    fontSize: '11px',
+                    fontWeight: 600,
+                    lineHeight: '18px',
+                    padding: '0 8px',
+                    borderRadius: '999px',
+                    background: cssVars.bgModulePlatform,
+                    color: badge.color,
+                  }}
+                >
+                  {badge.text}
+                </span>
+                <div
+                  style={{
+                    flex: '1',
+                    minWidth: 0,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '3px',
+                  }}
+                >
+                  <span
+                    style={{
+                      display: 'flex',
+                      alignItems: 'baseline',
+                      gap: '6px',
+                      minWidth: 0,
+                      fontSize: '13px',
+                      fontWeight: 600,
+                      color: cssVars.labelPrimary,
+                    }}
+                  >
                     <span
                       style={{
-                        flex: 'none',
-                        marginTop: '1px',
-                        fontSize: '11px',
-                        fontWeight: 600,
-                        lineHeight: '18px',
-                        padding: '0 8px',
-                        borderRadius: '999px',
-                        background: cssVars.bgModulePlatform,
-                        color: badge.color,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
                       }}
                     >
-                      {badge.text}
+                      {name.length > 0 ? name : t.unnamed}
                     </span>
-                    <div
-                      style={{
-                        flex: '1',
-                        minWidth: 0,
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: '3px',
-                      }}
-                    >
+                    {row.headers.length > 0 ? (
                       <span
                         style={{
-                          display: 'flex',
-                          alignItems: 'baseline',
-                          gap: '6px',
-                          minWidth: 0,
-                          fontSize: '13px',
-                          fontWeight: 600,
-                          color: cssVars.labelPrimary,
+                          flex: 'none',
+                          fontSize: '11px',
+                          fontWeight: 400,
+                          color: cssVars.labelTertiary,
                         }}
                       >
-                        <span
-                          style={{
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap',
-                          }}
-                        >
-                          {name.length > 0 ? name : t.unnamed}
-                        </span>
-                        {row.headers.length > 0 ? (
-                          <span
-                            style={{
-                              flex: 'none',
-                              fontSize: '11px',
-                              fontWeight: 400,
-                              color: cssVars.labelTertiary,
-                            }}
-                          >
-                            {String(row.headers.length)} {t.headerCountUnit}
-                          </span>
-                        ) : null}
+                        {String(row.headers.length)} {t.headerCountUnit}
                       </span>
-                      <code
-                        title={url}
+                    ) : null}
+                  </span>
+                  <code
+                    title={url}
+                    style={{
+                      fontSize: '12px',
+                      color: url.length > 0 ? cssVars.labelSecondary : cssVars.labelTertiary,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {url.length > 0 ? url : t.urlEmpty}
+                  </code>
+                  {description.length > 0 ? (
+                    <p
+                      style={{
+                        margin: 0,
+                        fontSize: '12px',
+                        lineHeight: 1.5,
+                        color: cssVars.labelTertiary,
+                        display: '-webkit-box',
+                        WebkitLineClamp: 2,
+                        WebkitBoxOrient: 'vertical',
+                        overflow: 'hidden',
+                      }}
+                    >
+                      {description}
+                    </p>
+                  ) : null}
+                  {remoteLine !== null ? (
+                    <p
+                      title={remoteLine}
+                      style={{
+                        margin: 0,
+                        fontSize: '12px',
+                        lineHeight: 1.5,
+                        color: cssVars.brand,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {t.remoteBadge}：{remoteLine}
+                    </p>
+                  ) : null}
+                  {probe?.status === 'failed' ? (
+                    <p
+                      style={{
+                        margin: 0,
+                        fontSize: '12px',
+                        lineHeight: 1.5,
+                        color: cssVars.labelError,
+                      }}
+                    >
+                      {t.testFailed}：{probe.message}
+                    </p>
+                  ) : null}
+                </div>
+                <div style={{ display: 'flex', gap: '6px', flex: 'none', alignItems: 'center' }}>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void runProbe(row, false)}
+                    disabled={disabled || probe?.status === 'testing'}
+                  >
+                    {probe?.status === 'testing' ? t.testing : t.test}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setEditingRow(row.id)}
+                    disabled={disabled}
+                  >
+                    {t.edit}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => removeRow(row.id)}
+                    disabled={disabled}
+                    style={{ color: cssVars.labelError }}
+                  >
+                    {t.remove}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )
+        }
+
+        // ---- Edit view: the full form, with a Done affordance. ----
+        return (
+          <div
+            key={row.id}
+            style={{
+              ...rowShell,
+              padding: '14px 12px',
+              background: cssVars.bgLayer2,
+              borderRadius: '10px',
+              borderTop: undefined,
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '8px',
+              }}
+            >
+              <span style={{ fontSize: '12px', fontWeight: 600, color: cssVars.labelSecondary }}>
+                {t.agentLabel} {index + 1}
+              </span>
+              <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setEditingRow(null)}
+                  disabled={disabled}
+                >
+                  {t.done}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => removeRow(row.id)}
+                  disabled={disabled}
+                  style={{ color: cssVars.labelError }}
+                >
+                  {t.remove}
+                </Button>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+              <label style={fieldStyle}>
+                <span style={labelStyle}>{t.name}</span>
+                <input
+                  style={inputStyle}
+                  value={row.name}
+                  placeholder={t.namePlaceholder}
+                  disabled={disabled}
+                  onChange={(event) => edit(row.id, { name: event.target.value })}
+                />
+                {issueFor(index, 'name') ? (
+                  <span style={issueStyle}>
+                    {t[issueFor(index, 'name') ?? ''] ?? issueFor(index, 'name')}
+                  </span>
+                ) : null}
+              </label>
+              <label style={{ ...fieldStyle, flex: '2 1 260px' }}>
+                <span style={labelStyle}>{t.url}</span>
+                <input
+                  style={inputStyle}
+                  value={row.url}
+                  placeholder={t.urlPlaceholder}
+                  disabled={disabled}
+                  onChange={(event) => edit(row.id, { url: event.target.value })}
+                />
+                {issueFor(index, 'url') ? (
+                  <span style={issueStyle}>
+                    {t[issueFor(index, 'url') ?? ''] ?? issueFor(index, 'url')}
+                  </span>
+                ) : null}
+              </label>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void runProbe(row, false)}
+                disabled={disabled || probes.get(row.id)?.status === 'testing'}
+              >
+                {probes.get(row.id)?.status === 'testing' ? t.testing : t.test}
+              </Button>
+            </div>
+
+            {(() => {
+              const inner = probes.get(row.id)
+              if (inner === undefined) {
+                return row.url.trim().length > 0 && !disabled ? (
+                  <p
+                    style={{
+                      margin: 0,
+                      fontSize: '12px',
+                      lineHeight: 1.5,
+                      color: cssVars.labelTertiary,
+                    }}
+                  >
+                    {t.probeRequired}
+                  </p>
+                ) : null
+              }
+              if (inner.status === 'testing') {
+                return (
+                  <p
+                    style={{
+                      margin: 0,
+                      fontSize: '12px',
+                      lineHeight: 1.5,
+                      color: cssVars.labelTertiary,
+                    }}
+                  >
+                    {t.testing}
+                  </p>
+                )
+              }
+              if (inner.status === 'failed') {
+                return (
+                  <p
+                    style={{
+                      margin: 0,
+                      fontSize: '12px',
+                      lineHeight: 1.5,
+                      color: cssVars.labelError,
+                    }}
+                  >
+                    {t.testFailed}：{inner.message}
+                  </p>
+                )
+              }
+              const hasRemote =
+                inner.remoteName !== undefined || inner.remoteDescription !== undefined
+              return (
+                <div
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '6px',
+                    padding: '10px 12px',
+                    borderRadius: '8px',
+                    background: cssVars.bgLayer3,
+                  }}
+                >
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: '8px',
+                    }}
+                  >
+                    <span style={{ fontSize: '12px', fontWeight: 600, color: cssVars.brand }}>
+                      ✓ {t.testOk}
+                    </span>
+                    {hasRemote ? (
+                      <Button variant="ghost" size="sm" onClick={() => adopt(row, inner)}>
+                        {t.adopt}
+                      </Button>
+                    ) : null}
+                  </div>
+                  {hasRemote ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                      <span
                         style={{
-                          fontSize: '12px',
-                          color: url.length > 0 ? cssVars.labelSecondary : cssVars.labelTertiary,
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
+                          fontSize: '11px',
+                          fontWeight: 500,
+                          color: cssVars.labelSecondary,
                         }}
                       >
-                        {url.length > 0 ? url : t.urlEmpty}
-                      </code>
-                      {description.length > 0 ? (
+                        {t.remoteCard}
+                      </span>
+                      <p style={{ margin: 0, fontSize: '13px', color: cssVars.labelPrimary }}>
+                        {inner.remoteName ?? t.remoteNoName}
+                      </p>
+                      {inner.remoteDescription !== undefined ? (
                         <p
                           style={{
                             margin: 0,
                             fontSize: '12px',
                             lineHeight: 1.5,
                             color: cssVars.labelTertiary,
-                            display: '-webkit-box',
-                            WebkitLineClamp: 2,
-                            WebkitBoxOrient: 'vertical',
-                            overflow: 'hidden',
                           }}
                         >
-                          {description}
-                        </p>
-                      ) : null}
-                      {remoteLine !== null ? (
-                        <p
-                          title={remoteLine}
-                          style={{
-                            margin: 0,
-                            fontSize: '12px',
-                            lineHeight: 1.5,
-                            color: cssVars.brand,
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap',
-                          }}
-                        >
-                          {t.remoteBadge}：{remoteLine}
-                        </p>
-                      ) : null}
-                      {probe?.status === 'failed' ? (
-                        <p
-                          style={{
-                            margin: 0,
-                            fontSize: '12px',
-                            lineHeight: 1.5,
-                            color: cssVars.labelError,
-                          }}
-                        >
-                          {t.testFailed}：{probe.message}
+                          {inner.remoteDescription}
                         </p>
                       ) : null}
                     </div>
-                    <div
-                      style={{ display: 'flex', gap: '6px', flex: 'none', alignItems: 'center' }}
-                    >
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => void runProbe(row, false)}
-                        disabled={disabled || probe?.status === 'testing'}
-                      >
-                        {probe?.status === 'testing' ? t.testing : t.test}
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setEditingRow(row.id)}
-                        disabled={disabled}
-                      >
-                        {t.edit}
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => removeRow(row.id)}
-                        disabled={disabled}
-                        style={{ color: cssVars.labelError }}
-                      >
-                        {t.remove}
-                      </Button>
-                    </div>
-                  </div>
+                  ) : (
+                    <p style={{ margin: 0, fontSize: '12px', color: cssVars.labelTertiary }}>
+                      {t.remoteEmpty}
+                    </p>
+                  )}
                 </div>
               )
-            }
+            })()}
 
-            // ---- Edit view: the full form, with a Done affordance. ----
-            return (
-              <div
-                key={row.id}
-                style={{
-                  ...rowShell,
-                  padding: '14px 12px',
-                  background: cssVars.bgLayer2,
-                  borderRadius: '10px',
-                  borderTop: undefined,
-                }}
-              >
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    gap: '8px',
-                  }}
-                >
-                  <span
-                    style={{ fontSize: '12px', fontWeight: 600, color: cssVars.labelSecondary }}
-                  >
-                    {t.agentLabel} {index + 1}
-                  </span>
-                  <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setEditingRow(null)}
-                      disabled={disabled}
-                    >
-                      {t.done}
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => removeRow(row.id)}
-                      disabled={disabled}
-                      style={{ color: cssVars.labelError }}
-                    >
-                      {t.remove}
-                    </Button>
-                  </div>
-                </div>
-
-                <div
-                  style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'flex-end' }}
-                >
-                  <label style={fieldStyle}>
-                    <span style={labelStyle}>{t.name}</span>
-                    <input
-                      style={inputStyle}
-                      value={row.name}
-                      placeholder={t.namePlaceholder}
-                      disabled={disabled}
-                      onChange={(event) => edit(row.id, { name: event.target.value })}
-                    />
-                    {issueFor(index, 'name') ? (
-                      <span style={issueStyle}>
-                        {t[issueFor(index, 'name') ?? ''] ?? issueFor(index, 'name')}
-                      </span>
-                    ) : null}
-                  </label>
-                  <label style={{ ...fieldStyle, flex: '2 1 260px' }}>
-                    <span style={labelStyle}>{t.url}</span>
-                    <input
-                      style={inputStyle}
-                      value={row.url}
-                      placeholder={t.urlPlaceholder}
-                      disabled={disabled}
-                      onChange={(event) => edit(row.id, { url: event.target.value })}
-                    />
-                    {issueFor(index, 'url') ? (
-                      <span style={issueStyle}>
-                        {t[issueFor(index, 'url') ?? ''] ?? issueFor(index, 'url')}
-                      </span>
-                    ) : null}
-                  </label>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <span style={labelStyle}>{t.headers}</span>
+              {row.headers.map((header) => (
+                <div key={header.id} style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                  <input
+                    style={{ ...inputStyle, flex: '1 1 160px' }}
+                    value={header.key}
+                    placeholder={t.headerKey}
+                    disabled={disabled}
+                    onChange={(event) => editHeader(row.id, header.id, { key: event.target.value })}
+                  />
+                  <input
+                    style={{ ...inputStyle, flex: '1 1 220px' }}
+                    value={header.value}
+                    placeholder={t.headerValue}
+                    disabled={disabled}
+                    onChange={(event) =>
+                      editHeader(row.id, header.id, { value: event.target.value })
+                    }
+                  />
                   <Button
-                    variant="outline"
+                    variant="ghost"
                     size="sm"
-                    onClick={() => void runProbe(row, false)}
-                    disabled={disabled || probes.get(row.id)?.status === 'testing'}
+                    onClick={() => removeHeader(row.id, header.id)}
+                    disabled={disabled}
+                    style={{ color: cssVars.labelError, flex: 'none' }}
                   >
-                    {probes.get(row.id)?.status === 'testing' ? t.testing : t.test}
+                    {t.removeHeader}
                   </Button>
                 </div>
-
-                {(() => {
-                  const inner = probes.get(row.id)
-                  if (inner === undefined) {
-                    return row.url.trim().length > 0 && !disabled ? (
-                      <p
-                        style={{
-                          margin: 0,
-                          fontSize: '12px',
-                          lineHeight: 1.5,
-                          color: cssVars.labelTertiary,
-                        }}
-                      >
-                        {t.probeRequired}
-                      </p>
-                    ) : null
-                  }
-                  if (inner.status === 'testing') {
-                    return (
-                      <p
-                        style={{
-                          margin: 0,
-                          fontSize: '12px',
-                          lineHeight: 1.5,
-                          color: cssVars.labelTertiary,
-                        }}
-                      >
-                        {t.testing}
-                      </p>
-                    )
-                  }
-                  if (inner.status === 'failed') {
-                    return (
-                      <p
-                        style={{
-                          margin: 0,
-                          fontSize: '12px',
-                          lineHeight: 1.5,
-                          color: cssVars.labelError,
-                        }}
-                      >
-                        {t.testFailed}：{inner.message}
-                      </p>
-                    )
-                  }
-                  const hasRemote =
-                    inner.remoteName !== undefined || inner.remoteDescription !== undefined
-                  return (
-                    <div
-                      style={{
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: '6px',
-                        padding: '10px 12px',
-                        borderRadius: '8px',
-                        background: cssVars.bgLayer3,
-                      }}
-                    >
-                      <div
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          gap: '8px',
-                        }}
-                      >
-                        <span style={{ fontSize: '12px', fontWeight: 600, color: cssVars.brand }}>
-                          ✓ {t.testOk}
-                        </span>
-                        {hasRemote ? (
-                          <Button variant="ghost" size="sm" onClick={() => adopt(row, inner)}>
-                            {t.adopt}
-                          </Button>
-                        ) : null}
-                      </div>
-                      {hasRemote ? (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                          <span
-                            style={{
-                              fontSize: '11px',
-                              fontWeight: 500,
-                              color: cssVars.labelSecondary,
-                            }}
-                          >
-                            {t.remoteCard}
-                          </span>
-                          <p style={{ margin: 0, fontSize: '13px', color: cssVars.labelPrimary }}>
-                            {inner.remoteName ?? t.remoteNoName}
-                          </p>
-                          {inner.remoteDescription !== undefined ? (
-                            <p
-                              style={{
-                                margin: 0,
-                                fontSize: '12px',
-                                lineHeight: 1.5,
-                                color: cssVars.labelTertiary,
-                              }}
-                            >
-                              {inner.remoteDescription}
-                            </p>
-                          ) : null}
-                        </div>
-                      ) : (
-                        <p style={{ margin: 0, fontSize: '12px', color: cssVars.labelTertiary }}>
-                          {t.remoteEmpty}
-                        </p>
-                      )}
-                    </div>
-                  )
-                })()}
-
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  <span style={labelStyle}>{t.headers}</span>
-                  {row.headers.map((header) => (
-                    <div
-                      key={header.id}
-                      style={{ display: 'flex', gap: '8px', alignItems: 'center' }}
-                    >
-                      <input
-                        style={{ ...inputStyle, flex: '1 1 160px' }}
-                        value={header.key}
-                        placeholder={t.headerKey}
-                        disabled={disabled}
-                        onChange={(event) =>
-                          editHeader(row.id, header.id, { key: event.target.value })
-                        }
-                      />
-                      <input
-                        style={{ ...inputStyle, flex: '1 1 220px' }}
-                        value={header.value}
-                        placeholder={t.headerValue}
-                        disabled={disabled}
-                        onChange={(event) =>
-                          editHeader(row.id, header.id, { value: event.target.value })
-                        }
-                      />
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => removeHeader(row.id, header.id)}
-                        disabled={disabled}
-                        style={{ color: cssVars.labelError, flex: 'none' }}
-                      >
-                        {t.removeHeader}
-                      </Button>
-                    </div>
-                  ))}
-                  <div>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => addHeader(row.id)}
-                      disabled={disabled}
-                    >
-                      + {t.addHeader}
-                    </Button>
-                  </div>
-                </div>
+              ))}
+              <div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => addHeader(row.id)}
+                  disabled={disabled}
+                >
+                  + {t.addHeader}
+                </Button>
               </div>
-            )
-          })}
-
-          <div style={{ marginTop: '12px' }}>
-            <Button variant="outline" size="sm" onClick={addRow} disabled={disabled}>
-              + {t.add}
-            </Button>
+            </div>
           </div>
+        )
+      })}
 
-          <div
+      <div style={{ marginTop: '12px' }}>
+        <Button variant="outline" size="sm" onClick={addRow} disabled={disabled}>
+          + {t.add}
+        </Button>
+      </div>
+
+      <div
+        style={{
+          borderTop: `1px solid ${cssVars.borderL2}`,
+          justifyContent: 'flex-end',
+          alignItems: 'center',
+          gap: '8px',
+          padding: '12px 0 0',
+          marginTop: '12px',
+          display: 'flex',
+        }}
+      >
+        {saveFailed ? (
+          <p
+            role="status"
             style={{
-              borderTop: `1px solid ${cssVars.borderL2}`,
-              justifyContent: 'flex-end',
-              alignItems: 'center',
-              gap: '8px',
-              padding: '12px 0 0',
-              marginTop: '12px',
-              display: 'flex',
+              minWidth: 0,
+              color: cssVars.labelError,
+              flex: '1',
+              margin: 0,
+              fontSize: '12px',
+              lineHeight: 1.5,
             }}
           >
-            {saveFailed ? (
-              <p
-                role="status"
-                style={{
-                  minWidth: 0,
-                  color: cssVars.labelError,
-                  flex: '1',
-                  margin: 0,
-                  fontSize: '12px',
-                  lineHeight: 1.5,
-                }}
-              >
-                {t.saveFailed}
-              </p>
-            ) : null}
-            {unverified.length > 0 && !disabled ? (
-              <p
-                role="status"
-                style={{
-                  minWidth: 0,
-                  color: cssVars.labelTertiary,
-                  flex: '1',
-                  margin: 0,
-                  fontSize: '12px',
-                  lineHeight: 1.5,
-                }}
-              >
-                {t.probeBlocked}（{unverified.length}）
-              </p>
-            ) : null}
-            {overridden && !disabled ? (
-              <Button variant="ghost" size="sm" onClick={() => void reset()} disabled={saving}>
-                {t.reset}
-              </Button>
-            ) : null}
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={discard}
-              disabled={!dirty || saving || disabled}
-            >
-              {t.discard}
-            </Button>
-            <Button
-              variant="primary"
-              size="sm"
-              onClick={() => void save()}
-              disabled={!dirty || issues.length > 0 || unverified.length > 0 || saving || disabled}
-            >
-              {saving ? t.saving : t.save}
-            </Button>
-          </div>
-        </div>
-      ) : null}
+            {t.saveFailed}
+          </p>
+        ) : unverified.length > 0 && !disabled ? (
+          <p
+            role="status"
+            style={{
+              minWidth: 0,
+              color: cssVars.labelTertiary,
+              flex: '1',
+              margin: 0,
+              fontSize: '12px',
+              lineHeight: 1.5,
+            }}
+          >
+            {t.probeBlocked}（{unverified.length}）
+          </p>
+        ) : dirty && !disabled ? (
+          <p
+            style={{
+              minWidth: 0,
+              color: cssVars.brand,
+              flex: '1',
+              margin: 0,
+              fontSize: '12px',
+              lineHeight: 1.5,
+            }}
+          >
+            {t.unsaved}
+          </p>
+        ) : null}
+        {overridden && !disabled ? (
+          <Button variant="ghost" size="sm" onClick={() => void reset()} disabled={saving}>
+            {t.reset}
+          </Button>
+        ) : null}
+        <Button variant="ghost" size="sm" onClick={discard} disabled={!dirty || saving || disabled}>
+          {t.discard}
+        </Button>
+        <Button
+          variant="primary"
+          size="sm"
+          onClick={() => void save()}
+          disabled={!dirty || issues.length > 0 || unverified.length > 0 || saving || disabled}
+        >
+          {saving ? t.saving : t.save}
+        </Button>
+      </div>
     </section>
   )
 }
@@ -1631,9 +1551,14 @@ function A2aSection(props: { scope: ScopeLike; remote: RemoteLike }): ReactNode 
       </header>
       <ServerInfoPanel remote={props.remote} scope={props.scope} />
       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-        <h3 style={{ margin: 0, fontSize: '14px', fontWeight: 600, color: cssVars.labelPrimary }}>
-          {t.outboundTitle}
-        </h3>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+          <h3 style={{ margin: 0, fontSize: '14px', fontWeight: 600, color: cssVars.labelPrimary }}>
+            {t.outboundTitle}
+          </h3>
+          <p style={{ margin: 0, fontSize: '13px', color: cssVars.labelTertiary }}>
+            {t.description}
+          </p>
+        </div>
         <A2aCard scope={props.scope} remote={props.remote} />
       </div>
     </section>
