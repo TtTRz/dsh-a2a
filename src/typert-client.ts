@@ -1,7 +1,8 @@
 /**
- * Client-side Remote descriptor for the A2A settings card's test button.
- * Mirrors the Host `A2aTestService` (src/typert.ts); the card mounts this
- * contribution so `remote.a2a.testAgentCard(url, headers)` routes to the Host.
+ * Client-side Remote descriptors for the A2A settings tab. Mirrors the Host
+ * `A2aTestService` (src/typert.ts); the tab mounts this contribution so
+ * `remote.a2a.testAgentCard(...)` and `remote.a2a.serverInfo()` route to the
+ * Host.
  *
  * @module dsh-a2a/typert-client
  */
@@ -13,6 +14,22 @@ const headersSchema = z.record(z.string(), z.string())
 const resultSchema = z.object({
   name: z.string().optional(),
   description: z.string().optional(),
+})
+const serverInfoSchema = z.object({
+  enabled: z.boolean(),
+  host: z.string(),
+  port: z.number(),
+  publicUrl: z.string().optional(),
+  apiKeySet: z.boolean(),
+  provider: z.string().optional(),
+  model: z.string().optional(),
+  preset: z.string(),
+  workspaceTitle: z.string(),
+  agentCard: z.object({
+    name: z.string(),
+    description: z.string(),
+    version: z.string(),
+  }),
 })
 
 export const TYPERT_REMOTE = {
@@ -46,6 +63,19 @@ export const TYPERT_REMOTE = {
         mode: 'strict' as const,
         typeSymbol: 'dsh-a2a/client#AgentCardProbe',
         schema: resultSchema,
+      },
+    },
+    {
+      id: 'dsh-a2a#a2a/serverInfo',
+      service: 'a2a',
+      namespace: 'a2a',
+      method: 'serverInfo',
+      invocation: { kind: 'direct' as const },
+      parameters: [],
+      result: {
+        mode: 'strict' as const,
+        typeSymbol: 'dsh-a2a/client#ServerInfo',
+        schema: serverInfoSchema,
       },
     },
   ],
