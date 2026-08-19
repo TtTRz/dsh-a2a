@@ -150,6 +150,17 @@ const COPY: { zh: Dictionary; en: Dictionary } = {
     adopt: '采用',
     probeRequired: '保存前需先测试成功。',
     probeBlocked: '仍有 agent 未验证通过，全部测试成功后才能保存',
+    edit: '编辑',
+    done: '完成',
+    unnamed: '未命名',
+    urlEmpty: '（未填 URL）',
+    identityEdit: '编辑身份',
+    unverifiedBadge: '未验证',
+    verifiedBadge: '已验证',
+    testingBadge: '测试中',
+    failedBadge: '测试失败',
+    remoteBadge: '远端',
+    headerCountUnit: '个请求头',
     tabTitle: 'A2A 服务',
     tabIntro: '本地 A2A 端点与出站远程 agent 注册表。',
     inboundTitle: '入口（本机作为 A2A agent）',
@@ -230,6 +241,17 @@ const COPY: { zh: Dictionary; en: Dictionary } = {
     adopt: 'Adopt',
     probeRequired: 'Test this agent successfully before saving.',
     probeBlocked: 'Some agents are not verified yet — save once all tests pass',
+    edit: 'Edit',
+    done: 'Done',
+    unnamed: 'Unnamed',
+    urlEmpty: '(no URL)',
+    identityEdit: 'Edit identity',
+    unverifiedBadge: 'Unverified',
+    verifiedBadge: 'Verified',
+    testingBadge: 'Testing',
+    failedBadge: 'Failed',
+    remoteBadge: 'Remote',
+    headerCountUnit: 'header(s)',
     tabTitle: 'A2A service',
     tabIntro: 'The local A2A endpoint and the outbound remote-agent registry.',
     inboundTitle: 'Inbound (this harness as an A2A agent)',
@@ -306,6 +328,8 @@ function A2aCard(props: { scope: ScopeLike; remote?: RemoteLike }): ReactNode {
   const [saving, setSaving] = useState(false)
   const [saveFailed, setSaveFailed] = useState(false)
   const [open, setOpen] = useState(true)
+  /** The row whose edit form is expanded; null = all rows show summaries. */
+  const [editingRow, setEditingRow] = useState<number | null>(null)
   const seeded = useRef(stored)
 
   const { issues } = draftToAgents(rows)
@@ -326,10 +350,9 @@ function A2aCard(props: { scope: ScopeLike; remote?: RemoteLike }): ReactNode {
     setSaveFailed(false)
   }
   const addRow = (): void => {
-    setRows((current) => [
-      ...current,
-      { id: freshRowId(), name: '', url: '', description: '', headers: [] },
-    ])
+    const id = freshRowId()
+    setRows((current) => [...current, { id, name: '', url: '', description: '', headers: [] }])
+    setEditingRow(id)
     setSaveFailed(false)
   }
   const removeRow = (id: number): void => {
@@ -453,6 +476,7 @@ function A2aCard(props: { scope: ScopeLike; remote?: RemoteLike }): ReactNode {
     seeded.current = stored
     const next = rowsFromAgents(stored)
     setRows(next)
+    setEditingRow(null)
     // Auto-verify persisted rows so the tab opens with remote info already
     // shown and verified states established; failures just surface in-row.
     for (const row of next) {
@@ -622,242 +646,435 @@ function A2aCard(props: { scope: ScopeLike; remote?: RemoteLike }): ReactNode {
             </p>
           ) : null}
 
-          {rows.map((row, index) => (
-            <div
-              key={row.id}
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '10px',
-                marginTop: index === 0 ? '4px' : '0',
-                padding: '14px 0',
-                borderTop: index === 0 ? undefined : `1px solid ${cssVars.borderL1}`,
-              }}
-            >
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: '8px',
-                }}
-              >
-                <span style={{ fontSize: '12px', fontWeight: 600, color: cssVars.labelSecondary }}>
-                  {t.agentLabel} {index + 1}
-                </span>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => removeRow(row.id)}
-                  disabled={disabled}
-                  style={{ color: cssVars.labelError }}
-                >
-                  {t.remove}
-                </Button>
-              </div>
+          {rows.map((row, index) => {
+            const probe = probes.get(row.id)
+            const rowShell = {
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '10px',
+              marginTop: index === 0 ? '4px' : '0',
+              padding: '14px 0',
+              borderTop: index === 0 ? undefined : `1px solid ${cssVars.borderL1}`,
+            } as const
 
-              <div
-                style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'flex-end' }}
-              >
-                <label style={fieldStyle}>
-                  <span style={labelStyle}>{t.name}</span>
-                  <input
-                    style={inputStyle}
-                    value={row.name}
-                    placeholder={t.namePlaceholder}
-                    disabled={disabled}
-                    onChange={(event) => edit(row.id, { name: event.target.value })}
-                  />
-                  {issueFor(index, 'name') ? (
-                    <span style={issueStyle}>
-                      {t[issueFor(index, 'name') ?? ''] ?? issueFor(index, 'name')}
+            // ---- Summary view: read-only row with badge + actions. ----
+            if (editingRow !== row.id) {
+              const badge =
+                probe === undefined
+                  ? { text: t.unverifiedBadge, color: cssVars.labelTertiary }
+                  : probe.status === 'testing'
+                    ? { text: t.testingBadge, color: cssVars.labelSecondary }
+                    : probe.status === 'ok'
+                      ? { text: t.verifiedBadge, color: cssVars.brand }
+                      : { text: t.failedBadge, color: cssVars.labelError }
+              const name = row.name.trim()
+              const url = row.url.trim()
+              const description = row.description.trim()
+              const remoteLine =
+                probe?.status === 'ok' &&
+                (probe.remoteName !== undefined || probe.remoteDescription !== undefined)
+                  ? `${probe.remoteName ?? t.remoteNoName}${probe.remoteDescription ? ` — ${probe.remoteDescription}` : ''}`
+                  : null
+              return (
+                <div key={row.id} style={rowShell}>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
+                    <span
+                      style={{
+                        flex: 'none',
+                        marginTop: '1px',
+                        fontSize: '11px',
+                        fontWeight: 600,
+                        lineHeight: '18px',
+                        padding: '0 8px',
+                        borderRadius: '999px',
+                        background: cssVars.bgModulePlatform,
+                        color: badge.color,
+                      }}
+                    >
+                      {badge.text}
                     </span>
-                  ) : null}
-                </label>
-                <label style={{ ...fieldStyle, flex: '2 1 260px' }}>
-                  <span style={labelStyle}>{t.url}</span>
-                  <input
-                    style={inputStyle}
-                    value={row.url}
-                    placeholder={t.urlPlaceholder}
-                    disabled={disabled}
-                    onChange={(event) => edit(row.id, { url: event.target.value })}
-                  />
-                  {issueFor(index, 'url') ? (
-                    <span style={issueStyle}>
-                      {t[issueFor(index, 'url') ?? ''] ?? issueFor(index, 'url')}
-                    </span>
-                  ) : null}
-                </label>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => void runProbe(row, false)}
-                  disabled={disabled || probes.get(row.id)?.status === 'testing'}
-                >
-                  {probes.get(row.id)?.status === 'testing' ? t.testing : t.test}
-                </Button>
-              </div>
-
-              {(() => {
-                const probe = probes.get(row.id)
-                if (probe === undefined) {
-                  return row.url.trim().length > 0 && !disabled ? (
-                    <p
-                      style={{
-                        margin: 0,
-                        fontSize: '12px',
-                        lineHeight: 1.5,
-                        color: cssVars.labelTertiary,
-                      }}
-                    >
-                      {t.probeRequired}
-                    </p>
-                  ) : null
-                }
-                if (probe.status === 'testing') {
-                  return (
-                    <p
-                      style={{
-                        margin: 0,
-                        fontSize: '12px',
-                        lineHeight: 1.5,
-                        color: cssVars.labelTertiary,
-                      }}
-                    >
-                      {t.testing}
-                    </p>
-                  )
-                }
-                if (probe.status === 'failed') {
-                  return (
-                    <p
-                      style={{
-                        margin: 0,
-                        fontSize: '12px',
-                        lineHeight: 1.5,
-                        color: cssVars.labelError,
-                      }}
-                    >
-                      {t.testFailed}：{probe.message}
-                    </p>
-                  )
-                }
-                const hasRemote =
-                  probe.remoteName !== undefined || probe.remoteDescription !== undefined
-                return (
-                  <div
-                    style={{
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: '6px',
-                      padding: '10px 12px',
-                      borderRadius: '8px',
-                      background: cssVars.bgLayer2,
-                    }}
-                  >
                     <div
                       style={{
+                        flex: '1',
+                        minWidth: 0,
                         display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        gap: '8px',
+                        flexDirection: 'column',
+                        gap: '3px',
                       }}
                     >
-                      <span style={{ fontSize: '12px', fontWeight: 600, color: cssVars.brand }}>
-                        ✓ {t.testOk}
-                      </span>
-                      {hasRemote ? (
-                        <Button variant="ghost" size="sm" onClick={() => adopt(row, probe)}>
-                          {t.adopt}
-                        </Button>
-                      ) : null}
-                    </div>
-                    {hasRemote ? (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                      <span
+                        style={{
+                          display: 'flex',
+                          alignItems: 'baseline',
+                          gap: '6px',
+                          minWidth: 0,
+                          fontSize: '13px',
+                          fontWeight: 600,
+                          color: cssVars.labelPrimary,
+                        }}
+                      >
                         <span
                           style={{
-                            fontSize: '11px',
-                            fontWeight: 500,
-                            color: cssVars.labelSecondary,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
                           }}
                         >
-                          {t.remoteCard}
+                          {name.length > 0 ? name : t.unnamed}
                         </span>
-                        <p style={{ margin: 0, fontSize: '13px', color: cssVars.labelPrimary }}>
-                          {probe.remoteName ?? t.remoteNoName}
-                        </p>
-                        {probe.remoteDescription !== undefined ? (
-                          <p
+                        {row.headers.length > 0 ? (
+                          <span
                             style={{
-                              margin: 0,
-                              fontSize: '12px',
-                              lineHeight: 1.5,
+                              flex: 'none',
+                              fontSize: '11px',
+                              fontWeight: 400,
                               color: cssVars.labelTertiary,
                             }}
                           >
-                            {probe.remoteDescription}
-                          </p>
+                            {String(row.headers.length)} {t.headerCountUnit}
+                          </span>
                         ) : null}
-                      </div>
-                    ) : (
-                      <p style={{ margin: 0, fontSize: '12px', color: cssVars.labelTertiary }}>
-                        {t.remoteEmpty}
-                      </p>
-                    )}
+                      </span>
+                      <code
+                        title={url}
+                        style={{
+                          fontSize: '12px',
+                          color: url.length > 0 ? cssVars.labelSecondary : cssVars.labelTertiary,
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {url.length > 0 ? url : t.urlEmpty}
+                      </code>
+                      {description.length > 0 ? (
+                        <p
+                          style={{
+                            margin: 0,
+                            fontSize: '12px',
+                            lineHeight: 1.5,
+                            color: cssVars.labelTertiary,
+                            display: '-webkit-box',
+                            WebkitLineClamp: 2,
+                            WebkitBoxOrient: 'vertical',
+                            overflow: 'hidden',
+                          }}
+                        >
+                          {description}
+                        </p>
+                      ) : null}
+                      {remoteLine !== null ? (
+                        <p
+                          title={remoteLine}
+                          style={{
+                            margin: 0,
+                            fontSize: '12px',
+                            lineHeight: 1.5,
+                            color: cssVars.brand,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          {t.remoteBadge}：{remoteLine}
+                        </p>
+                      ) : null}
+                      {probe?.status === 'failed' ? (
+                        <p
+                          style={{
+                            margin: 0,
+                            fontSize: '12px',
+                            lineHeight: 1.5,
+                            color: cssVars.labelError,
+                          }}
+                        >
+                          {t.testFailed}：{probe.message}
+                        </p>
+                      ) : null}
+                    </div>
+                    <div
+                      style={{ display: 'flex', gap: '6px', flex: 'none', alignItems: 'center' }}
+                    >
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => void runProbe(row, false)}
+                        disabled={disabled || probe?.status === 'testing'}
+                      >
+                        {probe?.status === 'testing' ? t.testing : t.test}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setEditingRow(row.id)}
+                        disabled={disabled}
+                      >
+                        {t.edit}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => removeRow(row.id)}
+                        disabled={disabled}
+                        style={{ color: cssVars.labelError }}
+                      >
+                        {t.remove}
+                      </Button>
+                    </div>
                   </div>
-                )
-              })()}
+                </div>
+              )
+            }
 
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <span style={labelStyle}>{t.headers}</span>
-                {row.headers.map((header) => (
-                  <div
-                    key={header.id}
-                    style={{ display: 'flex', gap: '8px', alignItems: 'center' }}
+            // ---- Edit view: the full form, with a Done affordance. ----
+            return (
+              <div
+                key={row.id}
+                style={{
+                  ...rowShell,
+                  padding: '14px 12px',
+                  background: cssVars.bgLayer2,
+                  borderRadius: '10px',
+                  borderTop: undefined,
+                }}
+              >
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: '8px',
+                  }}
+                >
+                  <span
+                    style={{ fontSize: '12px', fontWeight: 600, color: cssVars.labelSecondary }}
                   >
-                    <input
-                      style={{ ...inputStyle, flex: '1 1 160px' }}
-                      value={header.key}
-                      placeholder={t.headerKey}
+                    {t.agentLabel} {index + 1}
+                  </span>
+                  <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setEditingRow(null)}
                       disabled={disabled}
-                      onChange={(event) =>
-                        editHeader(row.id, header.id, { key: event.target.value })
-                      }
-                    />
-                    <input
-                      style={{ ...inputStyle, flex: '1 1 220px' }}
-                      value={header.value}
-                      placeholder={t.headerValue}
-                      disabled={disabled}
-                      onChange={(event) =>
-                        editHeader(row.id, header.id, { value: event.target.value })
-                      }
-                    />
+                    >
+                      {t.done}
+                    </Button>
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() => removeHeader(row.id, header.id)}
+                      onClick={() => removeRow(row.id)}
                       disabled={disabled}
-                      style={{ color: cssVars.labelError, flex: 'none' }}
+                      style={{ color: cssVars.labelError }}
                     >
-                      {t.removeHeader}
+                      {t.remove}
                     </Button>
                   </div>
-                ))}
-                <div>
+                </div>
+
+                <div
+                  style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'flex-end' }}
+                >
+                  <label style={fieldStyle}>
+                    <span style={labelStyle}>{t.name}</span>
+                    <input
+                      style={inputStyle}
+                      value={row.name}
+                      placeholder={t.namePlaceholder}
+                      disabled={disabled}
+                      onChange={(event) => edit(row.id, { name: event.target.value })}
+                    />
+                    {issueFor(index, 'name') ? (
+                      <span style={issueStyle}>
+                        {t[issueFor(index, 'name') ?? ''] ?? issueFor(index, 'name')}
+                      </span>
+                    ) : null}
+                  </label>
+                  <label style={{ ...fieldStyle, flex: '2 1 260px' }}>
+                    <span style={labelStyle}>{t.url}</span>
+                    <input
+                      style={inputStyle}
+                      value={row.url}
+                      placeholder={t.urlPlaceholder}
+                      disabled={disabled}
+                      onChange={(event) => edit(row.id, { url: event.target.value })}
+                    />
+                    {issueFor(index, 'url') ? (
+                      <span style={issueStyle}>
+                        {t[issueFor(index, 'url') ?? ''] ?? issueFor(index, 'url')}
+                      </span>
+                    ) : null}
+                  </label>
                   <Button
-                    variant="ghost"
+                    variant="outline"
                     size="sm"
-                    onClick={() => addHeader(row.id)}
-                    disabled={disabled}
+                    onClick={() => void runProbe(row, false)}
+                    disabled={disabled || probes.get(row.id)?.status === 'testing'}
                   >
-                    + {t.addHeader}
+                    {probes.get(row.id)?.status === 'testing' ? t.testing : t.test}
                   </Button>
                 </div>
+
+                {(() => {
+                  const inner = probes.get(row.id)
+                  if (inner === undefined) {
+                    return row.url.trim().length > 0 && !disabled ? (
+                      <p
+                        style={{
+                          margin: 0,
+                          fontSize: '12px',
+                          lineHeight: 1.5,
+                          color: cssVars.labelTertiary,
+                        }}
+                      >
+                        {t.probeRequired}
+                      </p>
+                    ) : null
+                  }
+                  if (inner.status === 'testing') {
+                    return (
+                      <p
+                        style={{
+                          margin: 0,
+                          fontSize: '12px',
+                          lineHeight: 1.5,
+                          color: cssVars.labelTertiary,
+                        }}
+                      >
+                        {t.testing}
+                      </p>
+                    )
+                  }
+                  if (inner.status === 'failed') {
+                    return (
+                      <p
+                        style={{
+                          margin: 0,
+                          fontSize: '12px',
+                          lineHeight: 1.5,
+                          color: cssVars.labelError,
+                        }}
+                      >
+                        {t.testFailed}：{inner.message}
+                      </p>
+                    )
+                  }
+                  const hasRemote =
+                    inner.remoteName !== undefined || inner.remoteDescription !== undefined
+                  return (
+                    <div
+                      style={{
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '6px',
+                        padding: '10px 12px',
+                        borderRadius: '8px',
+                        background: cssVars.bgLayer3,
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          gap: '8px',
+                        }}
+                      >
+                        <span style={{ fontSize: '12px', fontWeight: 600, color: cssVars.brand }}>
+                          ✓ {t.testOk}
+                        </span>
+                        {hasRemote ? (
+                          <Button variant="ghost" size="sm" onClick={() => adopt(row, inner)}>
+                            {t.adopt}
+                          </Button>
+                        ) : null}
+                      </div>
+                      {hasRemote ? (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                          <span
+                            style={{
+                              fontSize: '11px',
+                              fontWeight: 500,
+                              color: cssVars.labelSecondary,
+                            }}
+                          >
+                            {t.remoteCard}
+                          </span>
+                          <p style={{ margin: 0, fontSize: '13px', color: cssVars.labelPrimary }}>
+                            {inner.remoteName ?? t.remoteNoName}
+                          </p>
+                          {inner.remoteDescription !== undefined ? (
+                            <p
+                              style={{
+                                margin: 0,
+                                fontSize: '12px',
+                                lineHeight: 1.5,
+                                color: cssVars.labelTertiary,
+                              }}
+                            >
+                              {inner.remoteDescription}
+                            </p>
+                          ) : null}
+                        </div>
+                      ) : (
+                        <p style={{ margin: 0, fontSize: '12px', color: cssVars.labelTertiary }}>
+                          {t.remoteEmpty}
+                        </p>
+                      )}
+                    </div>
+                  )
+                })()}
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <span style={labelStyle}>{t.headers}</span>
+                  {row.headers.map((header) => (
+                    <div
+                      key={header.id}
+                      style={{ display: 'flex', gap: '8px', alignItems: 'center' }}
+                    >
+                      <input
+                        style={{ ...inputStyle, flex: '1 1 160px' }}
+                        value={header.key}
+                        placeholder={t.headerKey}
+                        disabled={disabled}
+                        onChange={(event) =>
+                          editHeader(row.id, header.id, { key: event.target.value })
+                        }
+                      />
+                      <input
+                        style={{ ...inputStyle, flex: '1 1 220px' }}
+                        value={header.value}
+                        placeholder={t.headerValue}
+                        disabled={disabled}
+                        onChange={(event) =>
+                          editHeader(row.id, header.id, { value: event.target.value })
+                        }
+                      />
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => removeHeader(row.id, header.id)}
+                        disabled={disabled}
+                        style={{ color: cssVars.labelError, flex: 'none' }}
+                      >
+                        {t.removeHeader}
+                      </Button>
+                    </div>
+                  ))}
+                  <div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => addHeader(row.id)}
+                      disabled={disabled}
+                    >
+                      + {t.addHeader}
+                    </Button>
+                  </div>
+                </div>
               </div>
-            </div>
-          ))}
+            )
+          })}
 
           <div style={{ marginTop: '12px' }}>
             <Button variant="outline" size="sm" onClick={addRow} disabled={disabled}>
@@ -963,6 +1180,7 @@ function ServerInfoPanel(props: { remote: RemoteLike; scope: ScopeLike }): React
   const [nameDraft, setNameDraft] = useState<string | null>(null)
   const [descDraft, setDescDraft] = useState<string | null>(null)
   const [savingIdentity, setSavingIdentity] = useState(false)
+  const [editingIdentity, setEditingIdentity] = useState(false)
   const refreshServerInfo = useCallback(async (): Promise<void> => {
     try {
       const result = await remote.a2a?.serverInfo()
@@ -1042,6 +1260,7 @@ function ServerInfoPanel(props: { remote: RemoteLike; scope: ScopeLike }): React
       })
       setNameDraft(null)
       setDescDraft(null)
+      setEditingIdentity(false)
       setLoading(true)
       setFailed(false)
       await refreshServerInfo()
@@ -1058,6 +1277,7 @@ function ServerInfoPanel(props: { remote: RemoteLike; scope: ScopeLike }): React
       await scope.unset('agentCard')
       setNameDraft(null)
       setDescDraft(null)
+      setEditingIdentity(false)
       setLoading(true)
       setFailed(false)
       await refreshServerInfo()
@@ -1168,66 +1388,116 @@ function ServerInfoPanel(props: { remote: RemoteLike; scope: ScopeLike }): React
                 paddingTop: '12px',
               }}
             >
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: '8px',
-                }}
-              >
-                <span style={{ fontSize: '12px', fontWeight: 600, color: cssVars.labelPrimary }}>
-                  {t.identityTitle}
-                </span>
-                {snapshot.user !== undefined &&
-                snapshot.user !== null &&
-                typeof snapshot.user === 'object' &&
-                'agentCard' in (snapshot.user as Record<string, unknown>) ? (
-                  <Button variant="ghost" size="sm" onClick={() => void resetIdentity()}>
-                    {t.identityReset}
-                  </Button>
-                ) : null}
-              </div>
-              <label style={itemStyle}>
-                <span style={labelStyle2}>{t.identityName}</span>
-                <input
-                  style={inputStyle2}
-                  value={nameDraft ?? currentCard?.name ?? ''}
-                  placeholder={t.identityName}
-                  onChange={(event) => setNameDraft(event.target.value)}
-                />
-              </label>
-              <label style={itemStyle}>
-                <span style={labelStyle2}>{t.identityDescription}</span>
-                <input
-                  style={inputStyle2}
-                  value={descDraft ?? currentCard?.description ?? ''}
-                  placeholder={t.identityDescription}
-                  onChange={(event) => setDescDraft(event.target.value)}
-                />
-              </label>
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-                {identityDirty ? (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => {
-                      setNameDraft(null)
-                      setDescDraft(null)
+              {editingIdentity ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: '8px',
                     }}
                   >
-                    {t.discard}
-                  </Button>
-                ) : null}
-                <Button
-                  variant="primary"
-                  size="sm"
-                  onClick={() => void saveIdentity()}
-                  disabled={!identityDirty || savingIdentity}
+                    <span
+                      style={{ fontSize: '12px', fontWeight: 600, color: cssVars.labelPrimary }}
+                    >
+                      {t.identityTitle}
+                    </span>
+                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                      {snapshot.user !== undefined &&
+                      snapshot.user !== null &&
+                      typeof snapshot.user === 'object' &&
+                      'agentCard' in (snapshot.user as Record<string, unknown>) ? (
+                        <Button variant="ghost" size="sm" onClick={() => void resetIdentity()}>
+                          {t.identityReset}
+                        </Button>
+                      ) : null}
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          setNameDraft(null)
+                          setDescDraft(null)
+                          setEditingIdentity(false)
+                        }}
+                      >
+                        {t.discard}
+                      </Button>
+                    </div>
+                  </div>
+                  <label style={itemStyle}>
+                    <span style={labelStyle2}>{t.identityName}</span>
+                    <input
+                      style={inputStyle2}
+                      value={nameDraft ?? currentCard?.name ?? ''}
+                      placeholder={t.identityName}
+                      onChange={(event) => setNameDraft(event.target.value)}
+                    />
+                  </label>
+                  <label style={itemStyle}>
+                    <span style={labelStyle2}>{t.identityDescription}</span>
+                    <input
+                      style={inputStyle2}
+                      value={descDraft ?? currentCard?.description ?? ''}
+                      placeholder={t.identityDescription}
+                      onChange={(event) => setDescDraft(event.target.value)}
+                    />
+                  </label>
+                  <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      onClick={() => void saveIdentity()}
+                      disabled={!identityDirty || savingIdentity}
+                    >
+                      {savingIdentity ? t.identitySaving : t.identitySave}
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <div
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '6px',
+                    borderTop: `1px solid ${cssVars.borderL2}`,
+                    paddingTop: '12px',
+                  }}
                 >
-                  {savingIdentity ? t.identitySaving : t.identitySave}
-                </Button>
-              </div>
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: '8px',
+                    }}
+                  >
+                    <span
+                      style={{ fontSize: '12px', fontWeight: 600, color: cssVars.labelPrimary }}
+                    >
+                      {t.inboundIdentity}
+                    </span>
+                    <Button variant="ghost" size="sm" onClick={() => setEditingIdentity(true)}>
+                      {t.identityEdit}
+                    </Button>
+                  </div>
+                  <p style={{ margin: 0, fontSize: '13px', color: cssVars.labelPrimary }}>
+                    {currentCard?.name ?? info.agentCard.name}
+                  </p>
+                  {(currentCard?.description ?? info.agentCard.description).length > 0 ? (
+                    <p
+                      style={{
+                        margin: 0,
+                        fontSize: '12px',
+                        lineHeight: 1.5,
+                        color: cssVars.labelTertiary,
+                      }}
+                    >
+                      {currentCard?.description ?? info.agentCard.description}
+                    </p>
+                  ) : null}
+                </div>
+              )}
             </div>
           ) : null}
         </div>
