@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-19
+
+### Added
+
+- Dedicated A2A settings section (settings nav tab) with an inbound panel and an outbound registry editor, replacing the Plugins → Plugin configuration card.
+- Inbound panel: read-only server summary over the `a2a.serverInfo` Remote (listen address, public URL, Bearer-auth state, model route, preset, workspace group, Agent Card identity), the full Agent Card URL with a copy button, an editable Agent Card name/description (settings namespace, hot-applied via `A2aServer.updateCard`, blank fields fall back to the deployment identity), and a bilingual how-to block.
+- Outbound registry: every row must pass the agent-card probe before the save enables; a URL or header edit invalidates the row's verification; persisted rows auto-probe on open; a successful probe shows the remote name/description with an "Adopt" button.
+
 ## [0.3.0] - 2026-08-18
 
 ### Added
