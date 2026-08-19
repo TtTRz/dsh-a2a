@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-08-19
+
+### Changed
+
+- View/edit split across the tab: outbound rows render as compact summaries (status badge, name, URL, description, header count, remote line) with Test / Edit / Remove actions; the full form opens only on Edit (new rows open in edit mode), Done collapses back. The inbound identity block shows text with an Edit button; inputs appear only in edit mode.
+- The how-to block became a hover popover behind a question icon in the inbound header, embedding the live Agent Card URL; it no longer takes vertical space.
+- Dropped the duplicated identity row from the inbound grid (version tag moved to the identity block heading) and flattened the collapsible outbound card into the section's visual language — the registry panel matches the inbound panel and the footer carries one status line (save failed / unverified count / unsaved).
+
 ## [0.4.0] - 2026-08-19
 
 ### Added
