@@ -19,7 +19,11 @@
  * @module dsh-a2a/client
  */
 
-import { Button, IconChevronDownOutline14 } from '@deepseek-ai/dsh-client-ui-primitives'
+import {
+  Button,
+  IconChevronDownOutline14,
+  IconQuestionOutline14,
+} from '@deepseek-ai/dsh-client-ui-primitives'
 import {
   type ReactNode,
   useCallback,
@@ -192,7 +196,7 @@ const COPY: { zh: Dictionary; en: Dictionary } = {
     identityReset: '重置为部署默认',
     tutorialTitle: '使用教程',
     tutorialStep1:
-      '调用本机 agent：把上方的 Agent Card 地址交给对方 A2A 客户端，或直接访问它查看身份卡片。',
+      '调用本机 agent：把下面的地址交给对方 A2A 客户端即可发现并调用本 agent（浏览器打开可查看身份卡片）。',
     tutorialStep2:
       '添加远程 agent：在出口区域「添加 agent」→ 填 Agent Card URL → 点「测试 agent-card」→ 测试成功后可「采用」远端声明的名称与描述 → 保存（未测试成功的行不能保存）。',
     // biome-ignore lint/suspicious/noTemplateCurlyInString: copy documents the ${ENV_VAR} header syntax
@@ -283,7 +287,7 @@ const COPY: { zh: Dictionary; en: Dictionary } = {
     identityReset: 'Reset to deployment default',
     tutorialTitle: 'How to use',
     tutorialStep1:
-      'Call this agent: hand the Agent Card URL above to any A2A client, or open it to inspect the identity card.',
+      'Call this agent: hand the address below to any A2A client to discover and call it (open it in a browser to inspect the card).',
     tutorialStep2:
       'Add a remote agent: in Outbound, "Add agent" → paste its Agent Card URL → "Test agent card" → once it passes you can "Adopt" the advertised name/description → Save (rows that never passed a test cannot be saved).',
     // biome-ignore lint/suspicious/noTemplateCurlyInString: copy documents the ${ENV_VAR} header syntax
@@ -1305,6 +1309,7 @@ function ServerInfoPanel(props: { remote: RemoteLike; scope: ScopeLike }): React
           {t.inboundTitle}
         </h3>
         <span style={{ flex: '1' }} />
+        <TutorialPopover cardUrl={cardUrl} />
         <Button
           variant="ghost"
           size="sm"
@@ -1506,43 +1511,94 @@ function ServerInfoPanel(props: { remote: RemoteLike; scope: ScopeLike }): React
   )
 }
 
-/** Static how-to block under the inbound panel. */
-function TutorialPanel(): ReactNode {
+/** Hover-pop how-to, anchored to a question icon in the inbound header. */
+function TutorialPopover(props: { cardUrl?: string }): ReactNode {
   const t = useCopy()
+  const { cardUrl } = props
+  const [open, setOpen] = useState(false)
+  const step = (text: string): ReactNode => (
+    <li style={{ margin: 0, fontSize: '12px', lineHeight: 1.6, color: cssVars.labelSecondary }}>
+      {text}
+    </li>
+  )
   return (
-    <section
-      style={{
-        border: `1px solid ${cssVars.borderL1}`,
-        borderRadius: '10px',
-        padding: '14px 16px',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '8px',
-      }}
-    >
-      <h3 style={{ margin: 0, fontSize: '14px', fontWeight: 600, color: cssVars.labelPrimary }}>
-        {t.tutorialTitle}
-      </h3>
-      <ol
+    <div style={{ position: 'relative', flex: 'none' }}>
+      <button
+        type="button"
+        aria-label={t.tutorialTitle}
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+        onMouseEnter={() => setOpen(true)}
+        onMouseLeave={() => setOpen(false)}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setOpen(false)}
         style={{
-          margin: 0,
-          paddingLeft: '20px',
+          appearance: 'none',
+          font: 'inherit',
+          cursor: 'pointer',
+          background: 'transparent',
+          border: 0,
+          padding: '2px',
+          borderRadius: '6px',
           display: 'flex',
-          flexDirection: 'column',
-          gap: '6px',
+          alignItems: 'center',
+          color: open ? cssVars.labelPrimary : cssVars.labelTertiary,
         }}
       >
-        <li style={{ margin: 0, fontSize: '13px', lineHeight: 1.6, color: cssVars.labelSecondary }}>
-          {t.tutorialStep1}
-        </li>
-        <li style={{ margin: 0, fontSize: '13px', lineHeight: 1.6, color: cssVars.labelSecondary }}>
-          {t.tutorialStep2}
-        </li>
-        <li style={{ margin: 0, fontSize: '13px', lineHeight: 1.6, color: cssVars.labelSecondary }}>
-          {t.tutorialStep3}
-        </li>
-      </ol>
-    </section>
+        <IconQuestionOutline14 style={{ display: 'block' }} />
+      </button>
+      {open ? (
+        <div
+          role="tooltip"
+          style={{
+            position: 'absolute',
+            top: 'calc(100% + 8px)',
+            right: 0,
+            width: 'min(380px, 86vw)',
+            zIndex: 20,
+            background: cssVars.bgLayer3,
+            border: `1px solid ${cssVars.borderL1}`,
+            borderRadius: '10px',
+            boxShadow: '0 8px 24px rgba(0, 0, 0, 0.12)',
+            padding: '12px 14px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '8px',
+          }}
+        >
+          <span style={{ fontSize: '12px', fontWeight: 600, color: cssVars.labelPrimary }}>
+            {t.tutorialTitle}
+          </span>
+          <ol
+            style={{
+              margin: 0,
+              paddingLeft: '18px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '5px',
+            }}
+          >
+            {step(t.tutorialStep1)}
+            {step(t.tutorialStep2)}
+            {step(t.tutorialStep3)}
+          </ol>
+          {cardUrl !== undefined ? (
+            <code
+              style={{
+                fontSize: '11px',
+                color: cssVars.labelSecondary,
+                background: cssVars.bgLayer2,
+                borderRadius: '6px',
+                padding: '4px 8px',
+                wordBreak: 'break-all',
+              }}
+            >
+              {cardUrl}
+            </code>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
   )
 }
 
@@ -1566,7 +1622,6 @@ function A2aSection(props: { scope: ScopeLike; remote: RemoteLike }): ReactNode 
         <p style={{ margin: 0, fontSize: '13px', color: cssVars.labelTertiary }}>{t.tabIntro}</p>
       </header>
       <ServerInfoPanel remote={props.remote} scope={props.scope} />
-      <TutorialPanel />
       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
         <h3 style={{ margin: 0, fontSize: '14px', fontWeight: 600, color: cssVars.labelPrimary }}>
           {t.outboundTitle}
