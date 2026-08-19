@@ -12,6 +12,7 @@
  * @module dsh-a2a/client
  */
 
+import { Button, IconChevronDownOutline14 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { type ReactNode, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import {
   type DraftRow,
@@ -23,7 +24,6 @@ import {
   type StoredAgent,
 } from './card-state.js'
 import { TYPERT_REMOTE } from './typert-client.js'
-import { Button, IconChevronDownOutline14 } from '@deepseek-ai/dsh-client-ui-primitives'
 
 /** The settings namespace this card claims; must match the Host registration. */
 const NAMESPACE = 'a2a'
@@ -186,6 +186,7 @@ function A2aCard(props: { scope: ScopeLike; remote?: RemoteLike }): ReactNode {
 
   // Re-seed the draft when the namespace moves underneath and the card holds
   // no unsaved edits (an external write, a reset, or our own save landing).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: rows is compared via the seeded ref on purpose — adding it to the deps would reseed on every draft edit and loop.
   useEffect(() => {
     if (isDirty(rows, seeded.current)) return
     seeded.current = stored
@@ -235,7 +236,10 @@ function A2aCard(props: { scope: ScopeLike; remote?: RemoteLike }): ReactNode {
     setRows((current) =>
       current.map((row) =>
         row.id === rowId
-          ? { ...row, headers: row.headers.map((h) => (h.id === headerId ? { ...h, ...patch } : h)) }
+          ? {
+              ...row,
+              headers: row.headers.map((h) => (h.id === headerId ? { ...h, ...patch } : h)),
+            }
           : row,
       ),
     )
@@ -244,9 +248,7 @@ function A2aCard(props: { scope: ScopeLike; remote?: RemoteLike }): ReactNode {
   const removeHeader = (rowId: number, headerId: number): void => {
     setRows((current) =>
       current.map((row) =>
-        row.id === rowId
-          ? { ...row, headers: row.headers.filter((h) => h.id !== headerId) }
-          : row,
+        row.id === rowId ? { ...row, headers: row.headers.filter((h) => h.id !== headerId) } : row,
       ),
     )
     setSaveFailed(false)
@@ -374,8 +376,17 @@ function A2aCard(props: { scope: ScopeLike; remote?: RemoteLike }): ReactNode {
           display: 'flex',
         }}
       >
-        <span style={{ flexDirection: 'column', flex: '1', gap: '4px', minWidth: 0, display: 'flex' }}>
-          <span style={{ color: cssVars.labelPrimary, fontSize: '15px', fontWeight: 600, lineHeight: 1.4 }}>
+        <span
+          style={{ flexDirection: 'column', flex: '1', gap: '4px', minWidth: 0, display: 'flex' }}
+        >
+          <span
+            style={{
+              color: cssVars.labelPrimary,
+              fontSize: '15px',
+              fontWeight: 600,
+              lineHeight: 1.4,
+            }}
+          >
             {t.title}
           </span>
           <span style={{ color: cssVars.labelTertiary, fontSize: '13px', lineHeight: 1.5 }}>
@@ -410,15 +421,31 @@ function A2aCard(props: { scope: ScopeLike; remote?: RemoteLike }): ReactNode {
       </button>
 
       {open ? (
-        <div style={{ borderTop: `1px solid ${cssVars.borderL2}`, margin: '0 16px', paddingBottom: '12px' }}>
+        <div
+          style={{
+            borderTop: `1px solid ${cssVars.borderL2}`,
+            margin: '0 16px',
+            paddingBottom: '12px',
+          }}
+        >
           {disabled ? (
-            <p role="status" style={{ color: cssVars.labelTertiary, margin: '12px 0 0', fontSize: '12px', lineHeight: 1.5 }}>
+            <p
+              role="status"
+              style={{
+                color: cssVars.labelTertiary,
+                margin: '12px 0 0',
+                fontSize: '12px',
+                lineHeight: 1.5,
+              }}
+            >
               {t.readonly}
             </p>
           ) : null}
 
           {rows.length === 0 ? (
-            <p style={{ color: cssVars.labelTertiary, margin: '12px 0 0', fontSize: '13px' }}>{t.empty}</p>
+            <p style={{ color: cssVars.labelTertiary, margin: '12px 0 0', fontSize: '13px' }}>
+              {t.empty}
+            </p>
           ) : null}
 
           {rows.map((row, index) => (
@@ -433,7 +460,14 @@ function A2aCard(props: { scope: ScopeLike; remote?: RemoteLike }): ReactNode {
                 borderTop: index === 0 ? undefined : `1px solid ${cssVars.borderL1}`,
               }}
             >
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '8px',
+                }}
+              >
                 <span style={{ fontSize: '12px', fontWeight: 600, color: cssVars.labelSecondary }}>
                   {t.agentLabel} {index + 1}
                 </span>
@@ -448,7 +482,9 @@ function A2aCard(props: { scope: ScopeLike; remote?: RemoteLike }): ReactNode {
                 </Button>
               </div>
 
-              <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+              <div
+                style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'flex-end' }}
+              >
                 <label style={fieldStyle}>
                   <span style={labelStyle}>{t.name}</span>
                   <input
@@ -506,20 +542,27 @@ function A2aCard(props: { scope: ScopeLike; remote?: RemoteLike }): ReactNode {
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                 <span style={labelStyle}>{t.headers}</span>
                 {row.headers.map((header) => (
-                  <div key={header.id} style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                  <div
+                    key={header.id}
+                    style={{ display: 'flex', gap: '8px', alignItems: 'center' }}
+                  >
                     <input
                       style={{ ...inputStyle, flex: '1 1 160px' }}
                       value={header.key}
                       placeholder={t.headerKey}
                       disabled={disabled}
-                      onChange={(event) => editHeader(row.id, header.id, { key: event.target.value })}
+                      onChange={(event) =>
+                        editHeader(row.id, header.id, { key: event.target.value })
+                      }
                     />
                     <input
                       style={{ ...inputStyle, flex: '1 1 220px' }}
                       value={header.value}
                       placeholder={t.headerValue}
                       disabled={disabled}
-                      onChange={(event) => editHeader(row.id, header.id, { value: event.target.value })}
+                      onChange={(event) =>
+                        editHeader(row.id, header.id, { value: event.target.value })
+                      }
                     />
                     <Button
                       variant="ghost"
@@ -533,7 +576,12 @@ function A2aCard(props: { scope: ScopeLike; remote?: RemoteLike }): ReactNode {
                   </div>
                 ))}
                 <div>
-                  <Button variant="ghost" size="sm" onClick={() => addHeader(row.id)} disabled={disabled}>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => addHeader(row.id)}
+                    disabled={disabled}
+                  >
                     + {t.addHeader}
                   </Button>
                 </div>
@@ -559,7 +607,17 @@ function A2aCard(props: { scope: ScopeLike; remote?: RemoteLike }): ReactNode {
             }}
           >
             {saveFailed ? (
-              <p role="status" style={{ minWidth: 0, color: cssVars.labelError, flex: '1', margin: 0, fontSize: '12px', lineHeight: 1.5 }}>
+              <p
+                role="status"
+                style={{
+                  minWidth: 0,
+                  color: cssVars.labelError,
+                  flex: '1',
+                  margin: 0,
+                  fontSize: '12px',
+                  lineHeight: 1.5,
+                }}
+              >
                 {t.saveFailed}
               </p>
             ) : null}
@@ -568,7 +626,12 @@ function A2aCard(props: { scope: ScopeLike; remote?: RemoteLike }): ReactNode {
                 {t.reset}
               </Button>
             ) : null}
-            <Button variant="ghost" size="sm" onClick={discard} disabled={!dirty || saving || disabled}>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={discard}
+              disabled={!dirty || saving || disabled}
+            >
               {t.discard}
             </Button>
             <Button

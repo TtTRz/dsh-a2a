@@ -35,7 +35,11 @@ export const TYPERT_REMOTE = {
           name: 'headers',
           wire: 'headers',
           source: 'json' as const,
-          codec: { mode: 'strict' as const, typeSymbol: 'Record<string, string>', schema: headersSchema },
+          codec: {
+            mode: 'strict' as const,
+            typeSymbol: 'Record<string, string>',
+            schema: headersSchema,
+          },
         },
       ],
       result: {

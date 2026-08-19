@@ -92,7 +92,8 @@ export function buildAgentCard(config: ResolvedServer, baseUrl: string): AgentCa
               },
             },
           },
-    securityRequirements: config.apiKey === undefined ? [] : [{ schemes: { bearer: { list: [] } } }],
+    securityRequirements:
+      config.apiKey === undefined ? [] : [{ schemes: { bearer: { list: [] } } }],
     defaultInputModes: ['text'],
     defaultOutputModes: ['text'],
     skills: [],
