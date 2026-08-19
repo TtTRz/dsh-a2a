@@ -16,6 +16,8 @@
 - 🤖 **一个 contextId = 一个 harness agent**——会话 id 由 `sha256(contextId)` 确定性派生，挂载 preset（默认 `standard`），跨轮次延续
 - 🔌 **完整 A2A v1.0 线格式**——`/.well-known/agent-card.json`、JSON-RPC `SendMessage` / `SendStreamingMessage` / `GetTask` / `CancelTask` / `ListTasks`（流式走 SSE）、REST `message:send` / `tasks/*`——全部经官方 SDK 的 request handler
 - 🔒 **客户端 header 鉴权**——每个 agent 的 headers 支持 `${ENV_VAR}` 占位符调用时解析，凭证不进配置
+- 🔑 **服务端 Bearer 鉴权**——设了 `server.apiKey` 后，除 Agent Card 外的所有请求须带 `Authorization: Bearer <key>`；Agent Card 还可宣告反代后的 `publicUrl`
+- 🧭 **独立模型路由与工作区**——A2A 会话可指定 provider/model 对，并归入专属 workspace（默认 `A2A` 分组、`~/.a2a-sessions` 目录）
 - ⏱️ **单轮超时**——慢轮次主动 cancel（`turnTimeoutMs`，默认 5 分钟），下一条消息不会被卡住
 - 🛡️ **配置失败即报错**——非法 URL、空名字、越界端口在插件加载时抛出
 - 🧪 **真线格式测试**——server 半身用官方 A2A client 走真实 HTTP 端口端到端验证
@@ -72,10 +74,52 @@ curl -s http://127.0.0.1:8899/ -H 'Content-Type: application/json' \
 | `server.host` / `server.port` | `127.0.0.1` / `8899` | 监听地址（env `A2A_HOST` / `A2A_PORT`） |
 | `server.preset` | `standard` | 挂进每个 A2A 会话 agent 的 preset |
 | `server.turnTimeoutMs` | `300000` | 单轮超时，超时取消本轮 |
+| `server.publicUrl` | — | Agent Card 上对外宣告的公开 URL（反代后必设）；env `A2A_PUBLIC_URL` |
+| `server.apiKey` | — | 设置后除 Agent Card 外的请求须带 `Authorization: Bearer <key>`；env `A2A_API_KEY` |
+| `server.provider` / `server.model` | — | A2A 会话模型路由，必须成对设置；缺省用 harness 默认模型；env `A2A_PROVIDER` / `A2A_MODEL` |
+| `server.cwd` | `~/.a2a-sessions` | A2A 会话工作目录（兼作侧边栏 workspace 路径）；env `DSH_A2A_CWD` |
+| `server.workspaceTitle` | `A2A` | 侧边栏 A2A 会话分组标题 |
 | `server.agentCard.*` | — | 展示给调用方的 Agent Card 身份 |
 | `agents[].name` / `url` | — | `a2a_call` 用的注册名 + Agent Card URL |
 | `agents[].headers` | `{}` | 请求头；`${ENV_VAR}` 占位符调用时解析 |
 | `agents[].description` | `''` | `a2a_list` 展示 |
+
+## 🏷️ 部署定制（推荐用法）
+
+dsh 的装配是分层的：**bundle 自带 patch（随 npm 分发）→ profile 的 `cordis.patch.yml` → 环境变量**。给部署打专属身份时，按层放对位置：
+
+- **包内 `cordis.patch.yml` 保持通用默认**——它随 npm 分发给所有用户，不要把部署专属身份（特定 preset、专属 Agent Card 名称/描述）写进去。
+- **部署身份放 profile 覆盖层**——在 `~/.dsh/profiles/web/cordis.patch.yml` 按 id 覆盖 `a2a` 行（不带 `- insert:` 前缀，且写全 `server` 字段）：
+
+```yaml
+# ~/.dsh/profiles/web/cordis.patch.yml
+- id: a2a
+  name: dsh-a2a
+  config:
+    server:
+      enabled: true
+      host: 127.0.0.1
+      port: 8899
+      preset: my-support-preset      # 部署专属 preset
+      turnTimeoutMs: 300000
+      agentCard:
+        name: My Support Agent       # 部署专属身份
+        description: Answers internal support questions.
+        version: '0.1.0'
+    agents: []
+```
+
+- **敏感值走环境变量**——`publicUrl` / `apiKey` / `provider` / `model` 的真实值不进任何 yaml，patch 里只留 `!!js process.env.XXX` 读取表达式，真实值放启动环境（systemd 用户可放 `EnvironmentFile`）：
+
+```ini
+# /etc/dsh-web.env（systemd EnvironmentFile 示例）
+A2A_PUBLIC_URL=https://gateway.example.com/
+A2A_API_KEY=<secret>
+A2A_PROVIDER=venus
+A2A_MODEL=deepseek-v4-flash-official
+```
+
+patch 层改动在装配期读取，改完需重启 `dsh web` 才生效；GUI 注册表（`agents`）例外，保存即热更新。
 
 ## 💬 模型工具
 
@@ -92,7 +136,7 @@ curl -s http://127.0.0.1:8899/ -H 'Content-Type: application/json' \
 
 ## ⚠️ 限制
 
-- 入站鉴权交给部署层（把端口放到鉴权网关或反代后面）；v0.1 的 Agent Card 不声明任何 security scheme
+- 入站鉴权：0.3.0 起可设 `server.apiKey` 开启 Bearer token 校验（Agent Card 除外——它必须公开可读）；大规模部署仍建议再套鉴权网关或反代，Agent Card 不声明 security scheme
 - 单个 executor 实例服务所有 context；跨轮次延续会话，但 dsh 重启后内存态重建（`sessionPersistence` 持久化是规划中的后续）
 - **0.2.0 起注册表支持 GUI 配置**：设置 → 插件 → 插件配置里的「A2A 远程 agent」卡片可直接增删改注册表，保存即热更新 `a2a_call` / `a2a_list`，无需重启；重置则恢复部署默认（cordis 行配置）。配置落在 settings 文档的 `a2a` 命名空间，解析层级为 schema 默认值 → 行配置 base → 用户覆盖
 

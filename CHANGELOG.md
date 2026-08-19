@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-18
+
+### Added
+
+- Server-side bearer auth (`server.apiKey`) and a `publicUrl` advertised on the Agent Card for reverse-proxied deployments.
+- Model route for A2A conversations (`server.provider` / `server.model`, set as a pair) and a dedicated workspace (`server.cwd` / `server.workspaceTitle`).
+- Task replies ride the terminal status update so tasks reach COMPLETED.
+- Deployment-customization guidance in the READMEs: keep the npm-distributed bundle patch generic, put deployment identity in the profile override layer, and inject secrets through environment variables.
+
 ## [0.2.1] - 2026-08-18
 
 ### Changed

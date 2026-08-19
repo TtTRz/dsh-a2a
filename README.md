@@ -16,6 +16,8 @@ One plugin, two halves, built on the official [`@a2a-js/sdk`](https://github.com
 - 🤖 **One contextId = one harness agent** — deterministic session ids (`sha256(contextId)`), preset-mounted (`standard` by default), persistent across turns.
 - 🔌 **Full A2A v1.0 wire** — `/.well-known/agent-card.json`, JSON-RPC `SendMessage` / `SendStreamingMessage` / `GetTask` / `CancelTask` / `ListTasks` (SSE for streaming), REST `message:send` / `tasks/*` — all through the official SDK's request handler.
 - 🔒 **Header auth on the client side** — per-agent headers with `${ENV_VAR}` placeholders resolved at call time; credentials never sit in the config.
+- 🔑 **Bearer auth on the server side** — with `server.apiKey` set, every request except the Agent Card must present `Authorization: Bearer <key>`; the card can also advertise a `publicUrl` behind a reverse proxy.
+- 🧭 **Model route and workspace** — A2A conversations can pin a provider/model pair and live in their own workspace group (`A2A`, `~/.a2a-sessions` by default).
 - ⏱️ **Turn deadlines** — a slow turn is cancelled (`turnTimeoutMs`, default 5 min) so the next message is never stuck.
 - 🛡️ **Fail-loud config** — bad URLs, empty names, or out-of-range ports throw at plugin load.
 - 🧪 **Real-wire tests** — the server half is exercised end to end with the official A2A client over a live HTTP port.
@@ -72,10 +74,52 @@ The mounted row lives in `~/.dsh/profiles/web/cordis.patch.yml`:
 | `server.host` / `server.port` | `127.0.0.1` / `8899` | Listen address (env `A2A_HOST` / `A2A_PORT`) |
 | `server.preset` | `standard` | Preset mounted into each A2A conversation agent |
 | `server.turnTimeoutMs` | `300000` | Per-turn deadline; a slow turn is cancelled |
+| `server.publicUrl` | — | Public URL advertised on the Agent Card (required behind a reverse proxy); env `A2A_PUBLIC_URL` |
+| `server.apiKey` | — | When set, every request except the Agent Card must present `Authorization: Bearer <key>`; env `A2A_API_KEY` |
+| `server.provider` / `server.model` | — | Model route for A2A conversations, must be set as a pair; falls back to the harness default model; env `A2A_PROVIDER` / `A2A_MODEL` |
+| `server.cwd` | `~/.a2a-sessions` | Working directory for A2A conversations (doubles as the sidebar workspace path); env `DSH_A2A_CWD` |
+| `server.workspaceTitle` | `A2A` | Sidebar group title for A2A conversations |
 | `server.agentCard.*` | — | Agent Card identity shown to callers |
 | `agents[].name` / `url` | — | Registry name for `a2a_call` + Agent Card URL |
 | `agents[].headers` | `{}` | Request headers; `${ENV_VAR}` placeholders resolved at call time |
 | `agents[].description` | `''` | Shown by `a2a_list` |
+
+## 🏷️ Deployment customization (recommended)
+
+dsh assemblies are layered: **the bundle's own patch (npm-distributed) → the profile's `cordis.patch.yml` → environment variables**. When giving a deployment its own identity, put each piece on the right layer:
+
+- **Keep the shipped `cordis.patch.yml` generic** — it reaches every npm consumer, so never bake deployment-specific identity (a bespoke preset, a dedicated Agent Card name/description) into it.
+- **Deployment identity goes in the profile override layer** — override the `a2a` row by id in `~/.dsh/profiles/web/cordis.patch.yml` (no `- insert:` prefix, and spell out the full `server` block):
+
+```yaml
+# ~/.dsh/profiles/web/cordis.patch.yml
+- id: a2a
+  name: dsh-a2a
+  config:
+    server:
+      enabled: true
+      host: 127.0.0.1
+      port: 8899
+      preset: my-support-preset      # deployment-specific preset
+      turnTimeoutMs: 300000
+      agentCard:
+        name: My Support Agent       # deployment-specific identity
+        description: Answers internal support questions.
+        version: '0.1.0'
+    agents: []
+```
+
+- **Secrets go in environment variables** — the real values of `publicUrl` / `apiKey` / `provider` / `model` never sit in any YAML; keep the `!!js process.env.XXX` expressions and inject the values at launch (systemd users can use `EnvironmentFile`):
+
+```ini
+# /etc/dsh-web.env (systemd EnvironmentFile example)
+A2A_PUBLIC_URL=https://gateway.example.com/
+A2A_API_KEY=<secret>
+A2A_PROVIDER=venus
+A2A_MODEL=deepseek-v4-flash-official
+```
+
+Patch-layer changes are read at assembly time — restart `dsh web` to apply them. The GUI registry (`agents`) is the exception: saves hot-reload.
 
 ## 💬 Model tools
 
@@ -92,7 +136,7 @@ The mounted row lives in `~/.dsh/profiles/web/cordis.patch.yml`:
 
 ## ⚠️ Limitations
 
-- Inbound authentication is delegated to the deployment (put the port behind an authenticating gateway or a reverse proxy); the Agent Card advertises no security schemes in v0.1.
+- Inbound authentication: since 0.3.0 `server.apiKey` enforces a Bearer token on every request except the Agent Card (which must stay publicly readable); for larger deployments, still put the port behind an authenticating gateway or a reverse proxy. The Agent Card advertises no security schemes.
 - One executor instance serves every context; sessions resume across turns but a dsh restart creates fresh in-memory state (session persistence via `sessionPersistence` is a planned follow-up).
 - ~~Outbound registry edits require a profile patch + restart~~ **0.2.0: GUI-configurable.** The Plugins → Plugin configuration section ships an "A2A remote agents" card over the `a2a` settings namespace (schema defaults → row-config base → user overrides); a save hot-reloads the running tools, and a reset re-inherits the deployment registry.
 
