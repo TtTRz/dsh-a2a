@@ -22,7 +22,7 @@ import { DshAgentExecutor } from './executor.js'
 import { A2aServer } from './server.js'
 import { attachSettings } from './settings.js'
 import { A2aRegistry, a2aTools } from './tools.js'
-import { A2aTestService } from './typert.js'
+import { A2aTestService, type ServerRef } from './typert.js'
 
 export const name = 'dsh-a2a'
 export const inject = ['agents', 'tools']
@@ -46,6 +46,7 @@ export {
   A2aTestService,
   type AgentCardProbe,
   type ServerInfo,
+  type ServerRef,
   serverInfoOf,
 } from './typert.js'
 
@@ -53,9 +54,17 @@ export {
 export function apply(ctx: Context, config: PluginConfig): void {
   const resolved = resolveConfig(config)
   // Host-side Remote surface for the settings tab (agent-card probe + server
-  // summary). Receives the resolved server config so the tab can show the
-  // inbound setup without any secret leaving the Host.
-  new A2aTestService(ctx, resolved.server.enabled ? resolved.server : undefined)
+  // summary). Reads through a mutable ref so settings-sourced Agent Card
+  // overrides show up in serverInfo without a restart.
+  const serverRef: ServerRef = {
+    server: resolved.server.enabled ? resolved.server : undefined,
+    agentCard: {
+      name: resolved.server.agentCard.name,
+      description: resolved.server.agentCard.description,
+    },
+  }
+  new A2aTestService(ctx, serverRef)
+  let server: A2aServer | undefined
   if (resolved.server.enabled) {
     const executor = new DshAgentExecutor(ctx, {
       preset: resolved.server.preset,
@@ -65,17 +74,18 @@ export function apply(ctx: Context, config: PluginConfig): void {
       provider: resolved.server.provider,
       model: resolved.server.model,
     })
-    const server = new A2aServer({
+    server = new A2aServer({
       config: resolved.server,
       executor,
     })
+    const bound = server
     ctx.effect(() => {
-      const running = server.start().catch((error: unknown) => {
+      const running = bound.start().catch((error: unknown) => {
         ctx.logger.error(`dsh-a2a: server failed to start: ${String(error)}`)
       })
       return async () => {
         await running
-        await server.stop()
+        await bound.stop()
       }
     }, 'dsh-a2a.server')
     // Best-effort: after a restart, re-attach persisted a2a- conversations to
@@ -86,9 +96,24 @@ export function apply(ctx: Context, config: PluginConfig): void {
   const tools = a2aTools(registry)
   ctx.effect(() => ctx.tools.register(tools.list), 'dsh-a2a.a2a_list')
   ctx.effect(() => ctx.tools.register(tools.call), 'dsh-a2a.a2a_call')
-  // The GUI registry: settings commits (Plugins → A2A card) hot-reload the
-  // tools above; profiles without a settings service keep the static registry.
-  attachSettings(ctx, { agents: resolved.agents }, (agents) => registry.update(agents))
+  // The GUI surface: settings commits (A2A settings tab) hot-reload the tools
+  // and the served Agent Card; profiles without a settings service keep the
+  // static cordis-row registry and identity.
+  attachSettings(
+    ctx,
+    {
+      agents: resolved.agents,
+      agentCard: {
+        name: resolved.server.agentCard.name,
+        description: resolved.server.agentCard.description,
+      },
+    },
+    (value) => {
+      registry.update(value.agents)
+      serverRef.agentCard = value.agentCard
+      server?.updateCard(value.agentCard)
+    },
+  )
 }
 
 /** Re-attach persisted `a2a-*` conversations to the grouping workspace. */

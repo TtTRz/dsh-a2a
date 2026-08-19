@@ -3,7 +3,8 @@
  * a remote agent card (the per-row test button) and one that reports the
  * local server's resolved configuration as a read-only summary (the tab's
  * inbound panel). Secrets never cross the wire: `apiKey` is reduced to a
- * boolean.
+ * boolean. The service reads through a mutable reference so settings-sourced
+ * Agent Card overrides are visible without a restart.
  *
  * @module dsh-a2a/typert
  */
@@ -33,8 +34,16 @@ export interface ServerInfo {
   agentCard: { name: string; description: string; version: string }
 }
 
-/** Project the resolved server config into its wire-safe summary. */
-export function serverInfoOf(server: ResolvedServer | undefined): ServerInfo {
+/** Mutable view the Host keeps current as settings land. */
+export interface ServerRef {
+  server: ResolvedServer | undefined
+  /** Full identity, already merged with any settings override. */
+  agentCard: { name: string; description: string }
+}
+
+/** Project the live server state into its wire-safe summary. */
+export function serverInfoOf(ref: ServerRef): ServerInfo {
+  const server = ref.server
   if (server === undefined) {
     return {
       enabled: false,
@@ -43,7 +52,7 @@ export function serverInfoOf(server: ResolvedServer | undefined): ServerInfo {
       apiKeySet: false,
       preset: 'standard',
       workspaceTitle: 'A2A',
-      agentCard: { name: 'dsh-a2a', description: '', version: '' },
+      agentCard: { name: ref.agentCard.name, description: ref.agentCard.description, version: '' },
     }
   }
   return {
@@ -57,8 +66,8 @@ export function serverInfoOf(server: ResolvedServer | undefined): ServerInfo {
     preset: server.preset,
     workspaceTitle: server.workspaceTitle,
     agentCard: {
-      name: server.agentCard.name,
-      description: server.agentCard.description,
+      name: ref.agentCard.name,
+      description: ref.agentCard.description,
       version: server.agentCard.version,
     },
   }
@@ -73,7 +82,7 @@ export function serverInfoOf(server: ResolvedServer | undefined): ServerInfo {
 export class A2aTestService extends TypertRemoteService {
   constructor(
     ctx: Context,
-    private readonly server: ResolvedServer | undefined,
+    private readonly ref: ServerRef,
   ) {
     super(ctx, 'a2a')
   }
@@ -100,6 +109,6 @@ export class A2aTestService extends TypertRemoteService {
 
   @Remote('serverInfo')
   async serverInfo(): Promise<ServerInfo> {
-    return serverInfoOf(this.server)
+    return serverInfoOf(this.ref)
   }
 }

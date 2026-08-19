@@ -4,6 +4,7 @@ import { attachSettings } from '../src/settings.js'
 
 interface SettingsValue {
   agents: unknown[]
+  agentCard?: { name?: string; description?: string }
 }
 
 interface FakeScope {
@@ -15,12 +16,16 @@ interface FakeSettings {
   register: (ns: string, schema: unknown, opts: unknown) => FakeScope
   watchers: Array<(next: SettingsValue) => void>
   lastOptions: { base?: Record<string, unknown>; applies?: string } | undefined
-  fire: (agents: unknown[]) => void
+  fire: (value: Partial<SettingsValue>) => void
 }
 
-function fakeSettings(initial: unknown[] = []): FakeSettings {
+function fakeSettings(initial: Partial<SettingsValue> = {}): FakeSettings {
   const watchers: Array<(next: SettingsValue) => void> = []
-  let value: SettingsValue | undefined = { agents: initial }
+  let value: SettingsValue | undefined = {
+    agents: initial.agents ?? [],
+    agentCard: { name: '', description: '' },
+    ...initial,
+  }
   let lastOptions: FakeSettings['lastOptions']
   return {
     watchers,
@@ -40,8 +45,8 @@ function fakeSettings(initial: unknown[] = []): FakeSettings {
         },
       }
     },
-    fire: (agents) => {
-      value = { agents }
+    fire: (next) => {
+      value = { ...(value ?? { agents: [] }), ...next }
       for (const watcher of watchers) watcher(value)
     },
   }
@@ -63,42 +68,65 @@ function fakeCtx(settings: FakeSettings): { ctx: Context; warnings: string[] } {
   return { ctx: ctx as unknown as Context, warnings }
 }
 
+const IDENTITY = { name: '部署默认身份', description: 'base description' }
+
 describe('attachSettings', () => {
   it('registers the namespace with the row config as composition base and feeds the initial value', () => {
-    const settings = fakeSettings([{ name: 'a', url: 'https://a.example.com/' }])
+    const settings = fakeSettings({ agents: [{ name: 'a', url: 'https://a.example.com/' }] })
     const { ctx } = fakeCtx(settings)
     const onChange = vi.fn()
     const base = [{ name: 'base', url: 'https://base.example.com/' }]
-    attachSettings(ctx, { agents: base }, onChange)
-    expect(settings.lastOptions).toMatchObject({ applies: 'live', base: { agents: base } })
-    expect(onChange).toHaveBeenCalledWith([
-      { name: 'a', url: 'https://a.example.com/', headers: {}, description: '' },
-    ])
+    attachSettings(ctx, { agents: base, agentCard: IDENTITY }, onChange)
+    expect(settings.lastOptions).toMatchObject({
+      applies: 'live',
+      base: { agents: base, agentCard: IDENTITY },
+    })
+    expect(onChange).toHaveBeenCalledWith({
+      agents: [{ name: 'a', url: 'https://a.example.com/', headers: {}, description: '' }],
+      agentCard: IDENTITY,
+    })
   })
 
   it('hot-reloads the registry when the settings document commits', () => {
     const settings = fakeSettings()
     const { ctx } = fakeCtx(settings)
     const onChange = vi.fn()
-    attachSettings(ctx, { agents: [] }, onChange)
+    attachSettings(ctx, { agents: [], agentCard: IDENTITY }, onChange)
     onChange.mockClear()
-    settings.fire([{ name: 'b', url: 'http://b.example.com/' }])
-    expect(onChange).toHaveBeenCalledWith([
-      { name: 'b', url: 'http://b.example.com/', headers: {}, description: '' },
-    ])
+    settings.fire({ agents: [{ name: 'b', url: 'http://b.example.com/' }] })
+    expect(onChange).toHaveBeenCalledWith({
+      agents: [{ name: 'b', url: 'http://b.example.com/', headers: {}, description: '' }],
+      agentCard: IDENTITY,
+    })
+  })
+
+  it('overrides the agent card identity and falls back on blank fields', () => {
+    const settings = fakeSettings({
+      agentCard: { name: '用户身份', description: '' },
+    })
+    const { ctx } = fakeCtx(settings)
+    const onChange = vi.fn()
+    attachSettings(ctx, { agents: [], agentCard: IDENTITY }, onChange)
+    expect(onChange).toHaveBeenCalledWith({
+      agents: [],
+      agentCard: { name: '用户身份', description: IDENTITY.description },
+    })
   })
 
   it('drops invalid rows and warns instead of failing the document', () => {
-    const settings = fakeSettings([
-      { name: '', url: 'x' },
-      { name: 'ok', url: 'https://ok.example.com/' },
-    ])
+    const settings = fakeSettings({
+      agents: [
+        { name: '', url: 'x' },
+        { name: 'ok', url: 'https://ok.example.com/' },
+      ],
+    })
     const { ctx, warnings } = fakeCtx(settings)
     const onChange = vi.fn()
-    attachSettings(ctx, { agents: [] }, onChange)
-    expect(onChange).toHaveBeenCalledWith([
-      { name: 'ok', url: 'https://ok.example.com/', headers: {}, description: '' },
-    ])
+    attachSettings(ctx, { agents: [], agentCard: IDENTITY }, onChange)
+    expect(onChange).toHaveBeenCalledWith({
+      agents: [{ name: 'ok', url: 'https://ok.example.com/', headers: {}, description: '' }],
+      agentCard: IDENTITY,
+    })
     expect(warnings.some((warning) => warning.includes('dropped 1'))).toBe(true)
   })
 })
