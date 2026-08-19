@@ -121,20 +121,40 @@ function restBody(raw: unknown): SendMessageRequest {
 export class A2aServer {
   private http: HttpServer | undefined
   private readonly sockets = new Set<import('node:net').Socket>()
-  private readonly jsonRpc: JsonRpcTransportHandler
+  private jsonRpc!: JsonRpcTransportHandler
+  private requestHandler!: DefaultRequestHandler
+  private readonly taskStore = new InMemoryTaskStore()
+  private card: AgentCard
 
   constructor(private readonly options: A2aServerOptions) {
-    const taskStore = new InMemoryTaskStore()
-    const handler = new DefaultRequestHandler(
-      buildAgentCard(options.config, this.url),
-      taskStore,
-      options.executor,
-    )
-    this.jsonRpc = new JsonRpcTransportHandler(handler)
-    this.requestHandler = handler
+    this.card = buildAgentCard(options.config, this.url)
+    this.rebuildHandlers()
   }
 
-  private readonly requestHandler: DefaultRequestHandler
+  /** Re-point the SDK handlers at the current card; tasks and the executor survive. */
+  private rebuildHandlers(): void {
+    this.requestHandler = new DefaultRequestHandler(
+      this.card,
+      this.taskStore,
+      this.options.executor,
+    )
+    this.jsonRpc = new JsonRpcTransportHandler(this.requestHandler)
+  }
+
+  /**
+   * Hot-apply a settings-sourced Agent Card identity override (name /
+   * description). In-flight tasks keep running — only the discovery card and
+   * subsequent handler responses change.
+   */
+  updateCard(patch: { name?: string; description?: string }): void {
+    this.card = {
+      ...this.card,
+      name: patch.name ?? this.card.name,
+      description: patch.description ?? this.card.description,
+    }
+    this.rebuildHandlers()
+  }
+
   private boundUrl: string | undefined
 
   /** The agent's base URL: the configured public URL, else the bound address. */

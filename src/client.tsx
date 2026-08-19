@@ -20,7 +20,14 @@
  */
 
 import { Button, IconChevronDownOutline14 } from '@deepseek-ai/dsh-client-ui-primitives'
-import { type ReactNode, useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react'
 import {
   type DraftRow,
   draftToAgents,
@@ -42,11 +49,16 @@ export const name = 'dsh-a2a-client'
 // "pending (waiting for service: remote.a2a)"). The card reads it lazily.
 export const inject = ['slots', 'settingsScope', 'remote']
 
-/** The slice of the client settings scope contract this card consumes. */
+/** The slice of the client settings scope contract this tab consumes. */
 interface ScopeLike {
   getSnapshot(): {
     status: 'loading' | 'ready' | 'unavailable'
-    value: { agents?: StoredAgent[] } | undefined
+    value:
+      | {
+          agents?: StoredAgent[]
+          agentCard?: { name: string; description: string }
+        }
+      | undefined
     user: unknown
     revision: number | undefined
     writable: boolean
@@ -132,6 +144,12 @@ const COPY: { zh: Dictionary; en: Dictionary } = {
     headerLine: '格式应为 Name: Value',
     agentLabel: 'Agent',
     saveFailed: '保存失败，请重试。',
+    remoteCard: '远端声明的信息',
+    remoteNoName: '（远端未声明名称）',
+    remoteEmpty: '远端 Agent Card 未声明名称与描述。',
+    adopt: '采用',
+    probeRequired: '保存前需先测试成功。',
+    probeBlocked: '仍有 agent 未验证通过，全部测试成功后才能保存',
     tabTitle: 'A2A 服务',
     tabIntro: '本地 A2A 端点与出站远程 agent 注册表。',
     inboundTitle: '入口（本机作为 A2A agent）',
@@ -152,6 +170,23 @@ const COPY: { zh: Dictionary; en: Dictionary } = {
     inboundPreset: 'Preset',
     inboundWorkspace: '工作区分组',
     outboundTitle: '出口（可调用的远程 agent）',
+    cardUrl: 'Agent Card 地址',
+    cardUrlCopy: '复制',
+    cardUrlCopied: '已复制',
+    identityTitle: 'Agent Card 身份（可编辑，保存即生效）',
+    identityName: '名称',
+    identityDescription: '描述',
+    identitySave: '保存身份',
+    identitySaving: '保存中…',
+    identityReset: '重置为部署默认',
+    tutorialTitle: '使用教程',
+    tutorialStep1:
+      '调用本机 agent：把上方的 Agent Card 地址交给对方 A2A 客户端，或直接访问它查看身份卡片。',
+    tutorialStep2:
+      '添加远程 agent：在出口区域「添加 agent」→ 填 Agent Card URL → 点「测试 agent-card」→ 测试成功后可「采用」远端声明的名称与描述 → 保存（未测试成功的行不能保存）。',
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: copy documents the ${ENV_VAR} header syntax
+    tutorialStep3:
+      '保存立即生效：注册表热更新到 a2a_call / a2a_list 工具，无需重启。请求头里可用 ${ENV_VAR} 引用环境变量。',
   },
   en: {
     title: 'A2A remote agents',
@@ -189,6 +224,12 @@ const COPY: { zh: Dictionary; en: Dictionary } = {
     headerLine: 'Expected Name: Value',
     agentLabel: 'Agent',
     saveFailed: 'Save failed; try again.',
+    remoteCard: 'Advertised by the remote card',
+    remoteNoName: '(the remote card declares no name)',
+    remoteEmpty: 'The remote Agent Card declares no name or description.',
+    adopt: 'Adopt',
+    probeRequired: 'Test this agent successfully before saving.',
+    probeBlocked: 'Some agents are not verified yet — save once all tests pass',
     tabTitle: 'A2A service',
     tabIntro: 'The local A2A endpoint and the outbound remote-agent registry.',
     inboundTitle: 'Inbound (this harness as an A2A agent)',
@@ -209,6 +250,23 @@ const COPY: { zh: Dictionary; en: Dictionary } = {
     inboundPreset: 'Preset',
     inboundWorkspace: 'Workspace group',
     outboundTitle: 'Outbound (remote agents to call)',
+    cardUrl: 'Agent Card URL',
+    cardUrlCopy: 'Copy',
+    cardUrlCopied: 'Copied',
+    identityTitle: 'Agent Card identity (editable, live on save)',
+    identityName: 'Name',
+    identityDescription: 'Description',
+    identitySave: 'Save identity',
+    identitySaving: 'Saving…',
+    identityReset: 'Reset to deployment default',
+    tutorialTitle: 'How to use',
+    tutorialStep1:
+      'Call this agent: hand the Agent Card URL above to any A2A client, or open it to inspect the identity card.',
+    tutorialStep2:
+      'Add a remote agent: in Outbound, "Add agent" → paste its Agent Card URL → "Test agent card" → once it passes you can "Adopt" the advertised name/description → Save (rows that never passed a test cannot be saved).',
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: copy documents the ${ENV_VAR} header syntax
+    tutorialStep3:
+      'Saves are live: the registry hot-reloads the a2a_call / a2a_list tools with no restart. Header values may reference environment variables as ${ENV_VAR}.',
   },
 }
 
@@ -250,15 +308,6 @@ function A2aCard(props: { scope: ScopeLike; remote?: RemoteLike }): ReactNode {
   const [open, setOpen] = useState(true)
   const seeded = useRef(stored)
 
-  // Re-seed the draft when the namespace moves underneath and the card holds
-  // no unsaved edits (an external write, a reset, or our own save landing).
-  // biome-ignore lint/correctness/useExhaustiveDependencies: rows is compared via the seeded ref on purpose — adding it to the deps would reseed on every draft edit and loop.
-  useEffect(() => {
-    if (isDirty(rows, seeded.current)) return
-    seeded.current = stored
-    setRows(rowsFromAgents(stored))
-  }, [stored])
-
   const { issues } = draftToAgents(rows)
   const issueFor = (row: number, field: 'name' | 'url' | 'headers'): string | undefined =>
     issues.find((issue) => issue.row === row && issue.field === field)?.message
@@ -271,6 +320,9 @@ function A2aCard(props: { scope: ScopeLike; remote?: RemoteLike }): ReactNode {
 
   const edit = (id: number, patch: Partial<Omit<DraftRow, 'id'>>): void => {
     setRows((current) => current.map((row) => (row.id === id ? { ...row, ...patch } : row)))
+    // A URL or header edit invalidates the row's verification; name/description
+    // edits keep it (the probe hit the same endpoint).
+    if (patch.url !== undefined || patch.headers !== undefined) setProbe(id, undefined)
     setSaveFailed(false)
   }
   const addRow = (): void => {
@@ -309,6 +361,7 @@ function A2aCard(props: { scope: ScopeLike; remote?: RemoteLike }): ReactNode {
           : row,
       ),
     )
+    setProbe(rowId, undefined)
     setSaveFailed(false)
   }
   const removeHeader = (rowId: number, headerId: number): void => {
@@ -319,38 +372,93 @@ function A2aCard(props: { scope: ScopeLike; remote?: RemoteLike }): ReactNode {
     )
     setSaveFailed(false)
   }
-  const [testing, setTesting] = useState<number | null>(null)
-  const [probe, setProbe] = useState<{ rowId: number; ok: boolean; message: string } | null>(null)
-  const testAgent = async (row: DraftRow): Promise<void> => {
-    if (testing !== null) return
-    if (remote?.a2a === undefined) {
-      setProbe({ rowId: row.id, ok: false, message: t.remoteUnavailable })
-      return
-    }
-    setTesting(row.id)
-    setProbe(null)
-    try {
-      const headers: Record<string, string> = {}
-      for (const pair of row.headers) {
-        const key = pair.key.trim()
-        if (key.length > 0) headers[key] = pair.value
-      }
-      const result = await remote.a2a.testAgentCard(row.url, headers)
-      if (!result.ok) throw new Error(result.error?.message ?? t.testFailed)
-      const card = result.value ?? {}
-      setProbe({ rowId: row.id, ok: true, message: card.name ?? card.description ?? t.testOk })
-      if (card.name !== undefined && row.name.trim() === '') edit(row.id, { name: card.name })
-      if (card.description !== undefined) edit(row.id, { description: card.description })
-    } catch (error) {
-      setProbe({
-        rowId: row.id,
-        ok: false,
-        message: error instanceof Error ? error.message : String(error),
-      })
-    } finally {
-      setTesting(null)
-    }
+  /** Per-row verification state; a URL or header edit invalidates the row. */
+  interface RowProbe {
+    status: 'testing' | 'ok' | 'failed'
+    url: string
+    remoteName?: string
+    remoteDescription?: string
+    message?: string
   }
+  const [probes, setProbes] = useState<ReadonlyMap<number, RowProbe>>(new Map())
+  const inflight = useRef(new Set<number>())
+  const setProbe = useCallback((rowId: number, probe: RowProbe | undefined): void => {
+    setProbes((current) => {
+      const next = new Map(current)
+      if (probe === undefined) next.delete(rowId)
+      else next.set(rowId, probe)
+      return next
+    })
+  }, [])
+  // Stable across renders on purpose (remote/t are stable): the seed effect
+  // depends on it, so a probe landing must NOT re-trigger re-seeding.
+  const runProbe = useCallback(
+    async (row: DraftRow, silent: boolean): Promise<void> => {
+      const url = row.url.trim()
+      if (url.length === 0 || inflight.current.has(row.id)) return
+      if (remote?.a2a === undefined) {
+        // Auto-probes skip quietly while the Remote surface is still mounting;
+        // a manual test reports the unavailability instead.
+        if (!silent) {
+          setProbe(row.id, { status: 'failed', url, message: t.remoteUnavailable })
+        }
+        return
+      }
+      inflight.current.add(row.id)
+      setProbe(row.id, { status: 'testing', url })
+      try {
+        const headers: Record<string, string> = {}
+        for (const pair of row.headers) {
+          const key = pair.key.trim()
+          if (key.length > 0) headers[key] = pair.value
+        }
+        const result = await remote.a2a.testAgentCard(url, headers)
+        if (!result.ok) throw new Error(result.error?.message ?? t.testFailed)
+        const card = result.value ?? {}
+        setProbe(row.id, {
+          status: 'ok',
+          url,
+          remoteName: card.name,
+          remoteDescription: card.description,
+        })
+      } catch (error) {
+        setProbe(row.id, {
+          status: 'failed',
+          url,
+          message: error instanceof Error ? error.message : String(error),
+        })
+      } finally {
+        inflight.current.delete(row.id)
+      }
+    },
+    [remote, t, setProbe],
+  )
+  const adopt = (row: DraftRow, probe: RowProbe): void => {
+    if (probe.remoteName !== undefined) edit(row.id, { name: probe.remoteName })
+    if (probe.remoteDescription !== undefined)
+      edit(row.id, { description: probe.remoteDescription })
+  }
+  /** Rows whose current URL has no successful probe yet; a save must wait. */
+  const unverified = rows.filter((row) => {
+    const url = row.url.trim()
+    if (url.length === 0) return false
+    const probe = probes.get(row.id)
+    return probe === undefined || probe.url !== url || probe.status !== 'ok'
+  })
+  // Re-seed the draft when the namespace moves underneath and the card holds
+  // no unsaved edits (an external write, a reset, or our own save landing).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: rows is compared via the seeded ref on purpose — adding it to the deps would reseed on every draft edit and loop.
+  useEffect(() => {
+    if (isDirty(rows, seeded.current)) return
+    seeded.current = stored
+    const next = rowsFromAgents(stored)
+    setRows(next)
+    // Auto-verify persisted rows so the tab opens with remote info already
+    // shown and verified states established; failures just surface in-row.
+    for (const row of next) {
+      if (row.url.trim().length > 0) void runProbe(row, true)
+    }
+  }, [stored, runProbe])
   const discard = (): void => {
     seeded.current = stored
     setRows(rowsFromAgents(stored))
@@ -584,26 +692,122 @@ function A2aCard(props: { scope: ScopeLike; remote?: RemoteLike }): ReactNode {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => void testAgent(row)}
-                  disabled={disabled || testing !== null}
+                  onClick={() => void runProbe(row, false)}
+                  disabled={disabled || probes.get(row.id)?.status === 'testing'}
                 >
-                  {testing === row.id ? t.testing : t.test}
+                  {probes.get(row.id)?.status === 'testing' ? t.testing : t.test}
                 </Button>
               </div>
 
-              {probe !== null && probe.rowId === row.id ? (
-                <p
-                  role="status"
-                  style={{
-                    margin: 0,
-                    fontSize: '12px',
-                    lineHeight: 1.5,
-                    color: probe.ok ? cssVars.brand : cssVars.labelError,
-                  }}
-                >
-                  {probe.message}
-                </p>
-              ) : null}
+              {(() => {
+                const probe = probes.get(row.id)
+                if (probe === undefined) {
+                  return row.url.trim().length > 0 && !disabled ? (
+                    <p
+                      style={{
+                        margin: 0,
+                        fontSize: '12px',
+                        lineHeight: 1.5,
+                        color: cssVars.labelTertiary,
+                      }}
+                    >
+                      {t.probeRequired}
+                    </p>
+                  ) : null
+                }
+                if (probe.status === 'testing') {
+                  return (
+                    <p
+                      style={{
+                        margin: 0,
+                        fontSize: '12px',
+                        lineHeight: 1.5,
+                        color: cssVars.labelTertiary,
+                      }}
+                    >
+                      {t.testing}
+                    </p>
+                  )
+                }
+                if (probe.status === 'failed') {
+                  return (
+                    <p
+                      style={{
+                        margin: 0,
+                        fontSize: '12px',
+                        lineHeight: 1.5,
+                        color: cssVars.labelError,
+                      }}
+                    >
+                      {t.testFailed}：{probe.message}
+                    </p>
+                  )
+                }
+                const hasRemote =
+                  probe.remoteName !== undefined || probe.remoteDescription !== undefined
+                return (
+                  <div
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '6px',
+                      padding: '10px 12px',
+                      borderRadius: '8px',
+                      background: cssVars.bgLayer2,
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: '8px',
+                      }}
+                    >
+                      <span style={{ fontSize: '12px', fontWeight: 600, color: cssVars.brand }}>
+                        ✓ {t.testOk}
+                      </span>
+                      {hasRemote ? (
+                        <Button variant="ghost" size="sm" onClick={() => adopt(row, probe)}>
+                          {t.adopt}
+                        </Button>
+                      ) : null}
+                    </div>
+                    {hasRemote ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                        <span
+                          style={{
+                            fontSize: '11px',
+                            fontWeight: 500,
+                            color: cssVars.labelSecondary,
+                          }}
+                        >
+                          {t.remoteCard}
+                        </span>
+                        <p style={{ margin: 0, fontSize: '13px', color: cssVars.labelPrimary }}>
+                          {probe.remoteName ?? t.remoteNoName}
+                        </p>
+                        {probe.remoteDescription !== undefined ? (
+                          <p
+                            style={{
+                              margin: 0,
+                              fontSize: '12px',
+                              lineHeight: 1.5,
+                              color: cssVars.labelTertiary,
+                            }}
+                          >
+                            {probe.remoteDescription}
+                          </p>
+                        ) : null}
+                      </div>
+                    ) : (
+                      <p style={{ margin: 0, fontSize: '12px', color: cssVars.labelTertiary }}>
+                        {t.remoteEmpty}
+                      </p>
+                    )}
+                  </div>
+                )
+              })()}
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                 <span style={labelStyle}>{t.headers}</span>
@@ -687,6 +891,21 @@ function A2aCard(props: { scope: ScopeLike; remote?: RemoteLike }): ReactNode {
                 {t.saveFailed}
               </p>
             ) : null}
+            {unverified.length > 0 && !disabled ? (
+              <p
+                role="status"
+                style={{
+                  minWidth: 0,
+                  color: cssVars.labelTertiary,
+                  flex: '1',
+                  margin: 0,
+                  fontSize: '12px',
+                  lineHeight: 1.5,
+                }}
+              >
+                {t.probeBlocked}（{unverified.length}）
+              </p>
+            ) : null}
             {overridden && !disabled ? (
               <Button variant="ghost" size="sm" onClick={() => void reset()} disabled={saving}>
                 {t.reset}
@@ -704,7 +923,7 @@ function A2aCard(props: { scope: ScopeLike; remote?: RemoteLike }): ReactNode {
               variant="primary"
               size="sm"
               onClick={() => void save()}
-              disabled={!dirty || issues.length > 0 || saving || disabled}
+              disabled={!dirty || issues.length > 0 || unverified.length > 0 || saving || disabled}
             >
               {saving ? t.saving : t.save}
             </Button>
@@ -730,33 +949,39 @@ interface ServerInfoValue {
 }
 
 /** Inbound panel: how this harness presents itself as an A2A agent. */
-function ServerInfoPanel(props: { remote: RemoteLike }): ReactNode {
+function ServerInfoPanel(props: { remote: RemoteLike; scope: ScopeLike }): ReactNode {
   const t = useCopy()
-  const { remote } = props
+  const { remote, scope } = props
+  const snapshot = useSyncExternalStore(
+    (listener) => scope.subscribe(listener),
+    () => scope.getSnapshot(),
+  )
   const [info, setInfo] = useState<ServerInfoValue | null>(null)
   const [loading, setLoading] = useState(true)
   const [failed, setFailed] = useState(false)
+  const [copied, setCopied] = useState(false)
+  const [nameDraft, setNameDraft] = useState<string | null>(null)
+  const [descDraft, setDescDraft] = useState<string | null>(null)
+  const [savingIdentity, setSavingIdentity] = useState(false)
+  const refreshServerInfo = useCallback(async (): Promise<void> => {
+    try {
+      const result = await remote.a2a?.serverInfo()
+      if (result === undefined || !result.ok) {
+        setFailed(true)
+        return
+      }
+      setInfo(result.value ?? null)
+    } catch {
+      setFailed(true)
+    } finally {
+      setLoading(false)
+    }
+  }, [remote])
   // biome-ignore lint/correctness/useExhaustiveDependencies: one-shot load on mount; the refresh button is the reload path and remote.a2a is a stable lazily-resolved facade.
   useEffect(() => {
-    let disposed = false
-    void (async () => {
-      try {
-        const result = await remote.a2a?.serverInfo()
-        if (disposed) return
-        if (result === undefined || !result.ok) {
-          setFailed(true)
-          return
-        }
-        setInfo(result.value ?? null)
-      } catch {
-        if (!disposed) setFailed(true)
-      } finally {
-        if (!disposed) setLoading(false)
-      }
-    })()
-    return () => {
-      disposed = true
-    }
+    setLoading(true)
+    setFailed(false)
+    void refreshServerInfo()
   }, [])
 
   const valueStyle: Record<string, string> = {
@@ -766,14 +991,83 @@ function ServerInfoPanel(props: { remote: RemoteLike }): ReactNode {
     wordBreak: 'break-all',
   }
   const itemStyle: Record<string, string> = { display: 'flex', flexDirection: 'column', gap: '2px' }
+  const labelStyle2: Record<string, string> = {
+    fontSize: '11px',
+    fontWeight: 500,
+    color: cssVars.labelSecondary,
+  }
+  const inputStyle2: Record<string, string> = {
+    boxSizing: 'border-box',
+    width: '100%',
+    font: 'inherit',
+    fontSize: '13px',
+    padding: '5px 8px',
+    borderRadius: '6px',
+    border: `1px solid ${cssVars.borderL1}`,
+    background: cssVars.bgLayer3,
+    color: cssVars.labelPrimary,
+  }
   const row = (label: string, value: ReactNode): ReactNode => (
     <div key={label} style={itemStyle}>
-      <span style={{ fontSize: '11px', fontWeight: 500, color: cssVars.labelSecondary }}>
-        {label}
-      </span>
+      <span style={labelStyle2}>{label}</span>
       <p style={valueStyle}>{value}</p>
     </div>
   )
+  const currentCard = snapshot.value?.agentCard
+  const cardBase =
+    info !== null && info.enabled
+      ? (info.publicUrl ?? `http://${info.host}:${String(info.port)}/`)
+      : undefined
+  const cardUrl =
+    cardBase === undefined
+      ? undefined
+      : cardBase.endsWith('/')
+        ? `${cardBase}.well-known/agent-card.json`
+        : `${cardBase}/.well-known/agent-card.json`
+  const copyCardUrl = (): void => {
+    if (cardUrl === undefined || typeof navigator === 'undefined') return
+    void navigator.clipboard.writeText(cardUrl).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    })
+  }
+  const identityDirty = nameDraft !== null || descDraft !== null
+  const saveIdentity = async (): Promise<void> => {
+    if (savingIdentity) return
+    setSavingIdentity(true)
+    try {
+      await scope.set('agentCard', {
+        name: nameDraft ?? currentCard?.name ?? '',
+        description: descDraft ?? currentCard?.description ?? '',
+      })
+      setNameDraft(null)
+      setDescDraft(null)
+      setLoading(true)
+      setFailed(false)
+      await refreshServerInfo()
+    } catch {
+      /* keep drafts so the user can retry */
+    } finally {
+      setSavingIdentity(false)
+    }
+  }
+  const resetIdentity = async (): Promise<void> => {
+    if (savingIdentity) return
+    setSavingIdentity(true)
+    try {
+      await scope.unset('agentCard')
+      setNameDraft(null)
+      setDescDraft(null)
+      setLoading(true)
+      setFailed(false)
+      await refreshServerInfo()
+    } catch {
+      /* keep drafts so the user can retry */
+    } finally {
+      setSavingIdentity(false)
+    }
+  }
+  const writable = snapshot.writable && snapshot.status === 'ready'
 
   return (
     <section
@@ -797,17 +1091,7 @@ function ServerInfoPanel(props: { remote: RemoteLike }): ReactNode {
           onClick={() => {
             setLoading(true)
             setFailed(false)
-            void remote.a2a
-              ?.serverInfo()
-              .then((result) => {
-                if (result === undefined || !result.ok) {
-                  setFailed(true)
-                  return
-                }
-                setInfo(result.value ?? null)
-              })
-              .catch(() => setFailed(true))
-              .finally(() => setLoading(false))
+            void refreshServerInfo()
           }}
         >
           {t.inboundRefresh}
@@ -824,34 +1108,170 @@ function ServerInfoPanel(props: { remote: RemoteLike }): ReactNode {
         </p>
       ) : null}
       {!loading && !failed && info !== null ? (
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-            gap: '12px',
-          }}
-        >
-          {row(
-            t.inboundStatus,
-            info.enabled ? `${t.inboundOn} · ${info.host}:${String(info.port)}` : t.inboundOff,
-          )}
-          {row(t.inboundListen, `${info.host}:${String(info.port)}`)}
-          {row(t.inboundPublicUrl, info.publicUrl ?? `http://${info.host}:${String(info.port)}/`)}
-          {row(t.inboundAuth, info.apiKeySet ? t.inboundAuthOn : t.inboundAuthOff)}
-          {row(
-            t.inboundModel,
-            info.provider !== undefined && info.model !== undefined
-              ? `${info.provider} / ${info.model}`
-              : t.inboundModelDefault,
-          )}
-          {row(t.inboundPreset, info.preset)}
-          {row(t.inboundWorkspace, info.workspaceTitle)}
-          {row(
-            t.inboundIdentity,
-            `${info.agentCard.name}${info.agentCard.version ? ` v${info.agentCard.version}` : ''}${info.agentCard.description ? ` — ${info.agentCard.description}` : ''}`,
-          )}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+              gap: '12px',
+            }}
+          >
+            {row(
+              t.inboundStatus,
+              info.enabled ? `${t.inboundOn} · ${info.host}:${String(info.port)}` : t.inboundOff,
+            )}
+            {row(t.inboundListen, `${info.host}:${String(info.port)}`)}
+            {row(t.inboundPublicUrl, info.publicUrl ?? `http://${info.host}:${String(info.port)}/`)}
+            {row(t.inboundAuth, info.apiKeySet ? t.inboundAuthOn : t.inboundAuthOff)}
+            {row(
+              t.inboundModel,
+              info.provider !== undefined && info.model !== undefined
+                ? `${info.provider} / ${info.model}`
+                : t.inboundModelDefault,
+            )}
+            {row(t.inboundPreset, info.preset)}
+            {row(t.inboundWorkspace, info.workspaceTitle)}
+            {row(
+              t.inboundIdentity,
+              `${info.agentCard.name}${info.agentCard.version ? ` v${info.agentCard.version}` : ''}${info.agentCard.description ? ` — ${info.agentCard.description}` : ''}`,
+            )}
+          </div>
+          {cardUrl !== undefined ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+              <span style={{ ...labelStyle2, flex: 'none' }}>{t.cardUrl}</span>
+              <code
+                style={{
+                  minWidth: 0,
+                  flex: '1',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  fontSize: '12px',
+                  color: cssVars.labelSecondary,
+                }}
+                title={cardUrl}
+              >
+                {cardUrl}
+              </code>
+              <Button variant="ghost" size="sm" onClick={copyCardUrl}>
+                {copied ? t.cardUrlCopied : t.cardUrlCopy}
+              </Button>
+            </div>
+          ) : null}
+          {writable ? (
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '8px',
+                borderTop: `1px solid ${cssVars.borderL2}`,
+                paddingTop: '12px',
+              }}
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '8px',
+                }}
+              >
+                <span style={{ fontSize: '12px', fontWeight: 600, color: cssVars.labelPrimary }}>
+                  {t.identityTitle}
+                </span>
+                {snapshot.user !== undefined &&
+                snapshot.user !== null &&
+                typeof snapshot.user === 'object' &&
+                'agentCard' in (snapshot.user as Record<string, unknown>) ? (
+                  <Button variant="ghost" size="sm" onClick={() => void resetIdentity()}>
+                    {t.identityReset}
+                  </Button>
+                ) : null}
+              </div>
+              <label style={itemStyle}>
+                <span style={labelStyle2}>{t.identityName}</span>
+                <input
+                  style={inputStyle2}
+                  value={nameDraft ?? currentCard?.name ?? ''}
+                  placeholder={t.identityName}
+                  onChange={(event) => setNameDraft(event.target.value)}
+                />
+              </label>
+              <label style={itemStyle}>
+                <span style={labelStyle2}>{t.identityDescription}</span>
+                <input
+                  style={inputStyle2}
+                  value={descDraft ?? currentCard?.description ?? ''}
+                  placeholder={t.identityDescription}
+                  onChange={(event) => setDescDraft(event.target.value)}
+                />
+              </label>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+                {identityDirty ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setNameDraft(null)
+                      setDescDraft(null)
+                    }}
+                  >
+                    {t.discard}
+                  </Button>
+                ) : null}
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={() => void saveIdentity()}
+                  disabled={!identityDirty || savingIdentity}
+                >
+                  {savingIdentity ? t.identitySaving : t.identitySave}
+                </Button>
+              </div>
+            </div>
+          ) : null}
         </div>
       ) : null}
+    </section>
+  )
+}
+
+/** Static how-to block under the inbound panel. */
+function TutorialPanel(): ReactNode {
+  const t = useCopy()
+  return (
+    <section
+      style={{
+        border: `1px solid ${cssVars.borderL1}`,
+        borderRadius: '10px',
+        padding: '14px 16px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '8px',
+      }}
+    >
+      <h3 style={{ margin: 0, fontSize: '14px', fontWeight: 600, color: cssVars.labelPrimary }}>
+        {t.tutorialTitle}
+      </h3>
+      <ol
+        style={{
+          margin: 0,
+          paddingLeft: '20px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '6px',
+        }}
+      >
+        <li style={{ margin: 0, fontSize: '13px', lineHeight: 1.6, color: cssVars.labelSecondary }}>
+          {t.tutorialStep1}
+        </li>
+        <li style={{ margin: 0, fontSize: '13px', lineHeight: 1.6, color: cssVars.labelSecondary }}>
+          {t.tutorialStep2}
+        </li>
+        <li style={{ margin: 0, fontSize: '13px', lineHeight: 1.6, color: cssVars.labelSecondary }}>
+          {t.tutorialStep3}
+        </li>
+      </ol>
     </section>
   )
 }
@@ -875,7 +1295,8 @@ function A2aSection(props: { scope: ScopeLike; remote: RemoteLike }): ReactNode 
         </h2>
         <p style={{ margin: 0, fontSize: '13px', color: cssVars.labelTertiary }}>{t.tabIntro}</p>
       </header>
-      <ServerInfoPanel remote={props.remote} />
+      <ServerInfoPanel remote={props.remote} scope={props.scope} />
+      <TutorialPanel />
       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
         <h3 style={{ margin: 0, fontSize: '14px', fontWeight: 600, color: cssVars.labelPrimary }}>
           {t.outboundTitle}
