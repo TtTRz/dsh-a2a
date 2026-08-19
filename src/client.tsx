@@ -1,13 +1,20 @@
 /**
- * Client half of dsh-a2a: the A2A card inside the Plugins settings section.
+ * Client half of dsh-a2a: the A2A settings tab (its own `settings.section`,
+ * so the service is one click from the settings nav rather than buried under
+ * Plugins → Plugin configuration).
  *
- * The card claims the `a2a` settings namespace (keyed `settings.plugin.item`
- * registration) and edits its one field — the `agents` registry — as staged
- * rows: add / edit / remove entries, then one save writes the whole array
- * through the client settings scope. A save lands on the Host, the namespace
- * watch fires, and the running `a2a_call` / `a2a_list` tools hot-reload — no
- * restart. The card carries its own bilingual copy so it renders identically
- * regardless of which locale services this deployment composes.
+ * The tab owns two panels:
+ * - **inbound** — a read-only summary of the local A2A endpoint (listen
+ *   address, public URL, auth state, model route, Agent Card identity),
+ *   projected by the Host through the `a2a.serverInfo` Remote; the apiKey
+ *   itself never crosses the wire.
+ * - **outbound** — the `agents` registry editor over the `a2a` settings
+ *   namespace: staged rows (name / URL / description / structured headers),
+ *   per-row agent-card probe, save / discard / reset. A save lands on the
+ *   Host, the namespace watch fires, and the running `a2a_call` / `a2a_list`
+ *   tools hot-reload — no restart. The tab carries its own bilingual copy so
+ *   it renders identically regardless of which locale services this
+ *   deployment composes.
  *
  * @module dsh-a2a/client
  */
@@ -51,10 +58,13 @@ interface ScopeLike {
 
 interface SlotsSurface {
   inject(key: string, register: () => unknown): unknown
-  register(options: { name: string; key?: string }, render: () => ReactNode): unknown
+  register(
+    options: { name: string; id?: string; order?: number; label?: string; key?: string },
+    render: () => ReactNode,
+  ): unknown
 }
 
-/** The slice of the client Remote surface this card consumes. */
+/** The slice of the client Remote surface this tab consumes. */
 interface RemoteLike {
   a2a?: {
     testAgentCard(
@@ -63,6 +73,22 @@ interface RemoteLike {
     ): Promise<{
       ok: boolean
       value?: { name?: string; description?: string }
+      error?: { code?: string; message?: string }
+    }>
+    serverInfo(): Promise<{
+      ok: boolean
+      value?: {
+        enabled: boolean
+        host: string
+        port: number
+        publicUrl?: string
+        apiKeySet: boolean
+        provider?: string
+        model?: string
+        preset: string
+        workspaceTitle: string
+        agentCard: { name: string; description: string; version: string }
+      }
       error?: { code?: string; message?: string }
     }>
   }
@@ -106,6 +132,26 @@ const COPY: { zh: Dictionary; en: Dictionary } = {
     headerLine: '格式应为 Name: Value',
     agentLabel: 'Agent',
     saveFailed: '保存失败，请重试。',
+    tabTitle: 'A2A 服务',
+    tabIntro: '本地 A2A 端点与出站远程 agent 注册表。',
+    inboundTitle: '入口（本机作为 A2A agent）',
+    inboundLoading: '读取入口配置…',
+    inboundUnavailable: '入口配置不可用。',
+    inboundRefresh: '刷新',
+    inboundStatus: '服务状态',
+    inboundOn: '运行中',
+    inboundOff: '已关闭',
+    inboundListen: '监听地址',
+    inboundPublicUrl: '公开地址',
+    inboundIdentity: 'Agent Card 身份',
+    inboundAuth: '鉴权',
+    inboundAuthOn: '已启用 Bearer token',
+    inboundAuthOff: '未启用（端口仅限本机/受信网络）',
+    inboundModel: '模型路由',
+    inboundModelDefault: '跟随 harness 默认模型',
+    inboundPreset: 'Preset',
+    inboundWorkspace: '工作区分组',
+    outboundTitle: '出口（可调用的远程 agent）',
   },
   en: {
     title: 'A2A remote agents',
@@ -143,6 +189,26 @@ const COPY: { zh: Dictionary; en: Dictionary } = {
     headerLine: 'Expected Name: Value',
     agentLabel: 'Agent',
     saveFailed: 'Save failed; try again.',
+    tabTitle: 'A2A service',
+    tabIntro: 'The local A2A endpoint and the outbound remote-agent registry.',
+    inboundTitle: 'Inbound (this harness as an A2A agent)',
+    inboundLoading: 'Reading inbound config…',
+    inboundUnavailable: 'Inbound config is unavailable.',
+    inboundRefresh: 'Refresh',
+    inboundStatus: 'Status',
+    inboundOn: 'Running',
+    inboundOff: 'Disabled',
+    inboundListen: 'Listen address',
+    inboundPublicUrl: 'Public URL',
+    inboundIdentity: 'Agent Card identity',
+    inboundAuth: 'Auth',
+    inboundAuthOn: 'Bearer token enforced',
+    inboundAuthOff: 'None (keep the port local / behind a trusted network)',
+    inboundModel: 'Model route',
+    inboundModelDefault: 'Follows the harness default model',
+    inboundPreset: 'Preset',
+    inboundWorkspace: 'Workspace group',
+    outboundTitle: 'Outbound (remote agents to call)',
   },
 }
 
@@ -649,7 +715,178 @@ function A2aCard(props: { scope: ScopeLike; remote?: RemoteLike }): ReactNode {
   )
 }
 
-/** Mount the A2A card into the Plugins section when the slots and settings services exist. */
+/** The read-only inbound summary the Host projects (secrets reduced to booleans). */
+interface ServerInfoValue {
+  enabled: boolean
+  host: string
+  port: number
+  publicUrl?: string
+  apiKeySet: boolean
+  provider?: string
+  model?: string
+  preset: string
+  workspaceTitle: string
+  agentCard: { name: string; description: string; version: string }
+}
+
+/** Inbound panel: how this harness presents itself as an A2A agent. */
+function ServerInfoPanel(props: { remote: RemoteLike }): ReactNode {
+  const t = useCopy()
+  const { remote } = props
+  const [info, setInfo] = useState<ServerInfoValue | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [failed, setFailed] = useState(false)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: one-shot load on mount; the refresh button is the reload path and remote.a2a is a stable lazily-resolved facade.
+  useEffect(() => {
+    let disposed = false
+    void (async () => {
+      try {
+        const result = await remote.a2a?.serverInfo()
+        if (disposed) return
+        if (result === undefined || !result.ok) {
+          setFailed(true)
+          return
+        }
+        setInfo(result.value ?? null)
+      } catch {
+        if (!disposed) setFailed(true)
+      } finally {
+        if (!disposed) setLoading(false)
+      }
+    })()
+    return () => {
+      disposed = true
+    }
+  }, [])
+
+  const valueStyle: Record<string, string> = {
+    margin: 0,
+    fontSize: '13px',
+    color: cssVars.labelPrimary,
+    wordBreak: 'break-all',
+  }
+  const itemStyle: Record<string, string> = { display: 'flex', flexDirection: 'column', gap: '2px' }
+  const row = (label: string, value: ReactNode): ReactNode => (
+    <div key={label} style={itemStyle}>
+      <span style={{ fontSize: '11px', fontWeight: 500, color: cssVars.labelSecondary }}>
+        {label}
+      </span>
+      <p style={valueStyle}>{value}</p>
+    </div>
+  )
+
+  return (
+    <section
+      style={{
+        border: `1px solid ${cssVars.borderL1}`,
+        borderRadius: '10px',
+        padding: '14px 16px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '10px',
+      }}
+    >
+      <header style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+        <h3 style={{ margin: 0, fontSize: '14px', fontWeight: 600, color: cssVars.labelPrimary }}>
+          {t.inboundTitle}
+        </h3>
+        <span style={{ flex: '1' }} />
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => {
+            setLoading(true)
+            setFailed(false)
+            void remote.a2a
+              ?.serverInfo()
+              .then((result) => {
+                if (result === undefined || !result.ok) {
+                  setFailed(true)
+                  return
+                }
+                setInfo(result.value ?? null)
+              })
+              .catch(() => setFailed(true))
+              .finally(() => setLoading(false))
+          }}
+        >
+          {t.inboundRefresh}
+        </Button>
+      </header>
+      {loading ? (
+        <p style={{ margin: 0, fontSize: '13px', color: cssVars.labelTertiary }}>
+          {t.inboundLoading}
+        </p>
+      ) : null}
+      {!loading && failed ? (
+        <p style={{ margin: 0, fontSize: '13px', color: cssVars.labelError }}>
+          {t.inboundUnavailable}
+        </p>
+      ) : null}
+      {!loading && !failed && info !== null ? (
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+            gap: '12px',
+          }}
+        >
+          {row(
+            t.inboundStatus,
+            info.enabled ? `${t.inboundOn} · ${info.host}:${String(info.port)}` : t.inboundOff,
+          )}
+          {row(t.inboundListen, `${info.host}:${String(info.port)}`)}
+          {row(t.inboundPublicUrl, info.publicUrl ?? `http://${info.host}:${String(info.port)}/`)}
+          {row(t.inboundAuth, info.apiKeySet ? t.inboundAuthOn : t.inboundAuthOff)}
+          {row(
+            t.inboundModel,
+            info.provider !== undefined && info.model !== undefined
+              ? `${info.provider} / ${info.model}`
+              : t.inboundModelDefault,
+          )}
+          {row(t.inboundPreset, info.preset)}
+          {row(t.inboundWorkspace, info.workspaceTitle)}
+          {row(
+            t.inboundIdentity,
+            `${info.agentCard.name}${info.agentCard.version ? ` v${info.agentCard.version}` : ''}${info.agentCard.description ? ` — ${info.agentCard.description}` : ''}`,
+          )}
+        </div>
+      ) : null}
+    </section>
+  )
+}
+
+/** The whole A2A settings tab: inbound summary on top, outbound registry below. */
+function A2aSection(props: { scope: ScopeLike; remote: RemoteLike }): ReactNode {
+  const t = useCopy()
+  return (
+    <section
+      style={{
+        maxWidth: '760px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '16px',
+        padding: '8px 0',
+      }}
+    >
+      <header style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+        <h2 style={{ margin: 0, fontSize: '18px', fontWeight: 600, color: cssVars.labelPrimary }}>
+          {t.tabTitle}
+        </h2>
+        <p style={{ margin: 0, fontSize: '13px', color: cssVars.labelTertiary }}>{t.tabIntro}</p>
+      </header>
+      <ServerInfoPanel remote={props.remote} />
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        <h3 style={{ margin: 0, fontSize: '14px', fontWeight: 600, color: cssVars.labelPrimary }}>
+          {t.outboundTitle}
+        </h3>
+        <A2aCard scope={props.scope} remote={props.remote} />
+      </div>
+    </section>
+  )
+}
+
+/** Mount the A2A settings tab when the slots and settings services exist. */
 export function apply(ctx: unknown): void {
   const c = ctx as {
     get(service: string): unknown
@@ -678,9 +915,9 @@ export function apply(ctx: unknown): void {
       return c.get('remote.a2a') as RemoteLike['a2a']
     },
   }
-  slots.inject('settings.plugin.item', () =>
-    slots.register({ name: 'settings.plugin.item', key: NAMESPACE }, () => (
-      <A2aCard scope={scope} remote={cardRemote} />
+  slots.inject('settings.section', () =>
+    slots.register({ name: 'settings.section', id: 'a2a', order: 900, label: 'A2A' }, () => (
+      <A2aSection scope={scope} remote={cardRemote} />
     )),
   )
 }

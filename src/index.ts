@@ -42,12 +42,20 @@ export { collectReplyText, DshAgentExecutor, sessionIdFor, textOf } from './exec
 export { A2aServer, type A2aServerOptions, buildAgentCard, type RequestObserver } from './server.js'
 export { A2aSettings, attachSettings, SETTINGS_NAMESPACE } from './settings.js'
 export { A2aRegistry, type A2aToolOptions, a2aTools } from './tools.js'
+export {
+  A2aTestService,
+  type AgentCardProbe,
+  type ServerInfo,
+  serverInfoOf,
+} from './typert.js'
 
 /** Mount the A2A endpoint and the model-facing tools, tied to the Cordis lifecycle. */
 export function apply(ctx: Context, config: PluginConfig): void {
-  // Host-side Remote surface for the settings card's "test agent-card" button.
-  new A2aTestService(ctx)
   const resolved = resolveConfig(config)
+  // Host-side Remote surface for the settings tab (agent-card probe + server
+  // summary). Receives the resolved server config so the tab can show the
+  // inbound setup without any secret leaving the Host.
+  new A2aTestService(ctx, resolved.server.enabled ? resolved.server : undefined)
   if (resolved.server.enabled) {
     const executor = new DshAgentExecutor(ctx, {
       preset: resolved.server.preset,
