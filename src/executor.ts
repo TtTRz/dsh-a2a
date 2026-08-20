@@ -11,6 +11,7 @@
  */
 
 import { createHash, randomUUID } from 'node:crypto'
+import { existsSync, readdirSync } from 'node:fs'
 import { mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { Message, Part, Task, TaskState } from '@a2a-js/sdk'
@@ -235,7 +236,11 @@ export class DshAgentExecutor implements AgentExecutor {
   private async openTurn(sessionId: SessionId, contextId: string): Promise<RunningTurn> {
     const live = this.ctx.agents.get(sessionId)
     if (live !== undefined) {
-      void this.attachToWorkspace(String(sessionId))
+      // Adopted agents were attached to their per-session workspace when they
+      // were created (attach validates the session cwd against the workspace
+      // path, which only matches the creator's row); re-attaching here could
+      // mint an empty row for a session whose stored cwd predates per-session
+      // dirs, so skip it.
       return { agent: live, dispose: async () => undefined, sessionId, contextId }
     }
     const selection = this.modelSelection()
@@ -253,7 +258,7 @@ export class DshAgentExecutor implements AgentExecutor {
         }
       | undefined
     const presetId = presets === undefined ? undefined : await this.resolvePreset(presets)
-    const cwd = this.sessionDir(sessionId)
+    const cwd = this.sessionDir(sessionId, contextId)
     await mkdir(cwd, { recursive: true })
     const handle = await this.ctx.agents.create({
       sessionId,
@@ -266,7 +271,7 @@ export class DshAgentExecutor implements AgentExecutor {
         installModelSelection(agentCtx, { current: selection, assembled: undefined })
       },
     })
-    void this.attachToWorkspace(String(sessionId))
+    void this.attachToWorkspace(String(sessionId), contextId)
     return { agent: handle.agent, dispose: handle.dispose, sessionId, contextId }
   }
 
@@ -292,9 +297,9 @@ export class DshAgentExecutor implements AgentExecutor {
    * grouping workspace is per-session too — one sidebar row per A2A caller
    * context. A session whose grouping fails must never fail the message itself.
    */
-  async attachToWorkspace(sessionId: string): Promise<void> {
+  async attachToWorkspace(sessionId: string, contextId?: string): Promise<void> {
     try {
-      const workspace = await this.ensureWorkspace(sessionId)
+      const workspace = await this.ensureWorkspace(sessionId, contextId)
       await workspace?.attachSession(sessionId)
     } catch (error) {
       this.ctx.logger.warn(`dsh-a2a: workspace attach failed for ${sessionId}: ${String(error)}`)
@@ -306,11 +311,14 @@ export class DshAgentExecutor implements AgentExecutor {
    * not-yet-mounted registry) are forgotten so the next call retries instead of
    * caching the miss forever.
    */
-  private ensureWorkspace(sessionId: string): Promise<Workspace | undefined> {
+  private ensureWorkspace(
+    sessionId: string,
+    contextId?: string,
+  ): Promise<Workspace | undefined> {
     this.workspacePromise ??= new Map()
     const cached = this.workspacePromise.get(sessionId)
     if (cached !== undefined) return cached
-    const current = this.openWorkspace(sessionId).then(
+    const current = this.openWorkspace(sessionId, contextId).then(
       (workspace) => {
         if (workspace === undefined) this.forgetWorkspace(sessionId, current)
         return workspace
@@ -330,10 +338,13 @@ export class DshAgentExecutor implements AgentExecutor {
     }
   }
 
-  private async openWorkspace(sessionId: string): Promise<Workspace | undefined> {
+  private async openWorkspace(
+    sessionId: string,
+    contextId?: string,
+  ): Promise<Workspace | undefined> {
     const registry = this.ctx.get('workspaceRegistry') as WorkspaceRegistry | undefined
     if (registry === undefined) return undefined
-    const cwd = this.sessionDir(SessionId(sessionId))
+    const cwd = this.sessionDir(SessionId(sessionId), contextId ?? sessionId)
     await mkdir(cwd, { recursive: true })
     const title = `${this.options.workspaceTitle ?? 'A2A'} · ${sessionId}`
     return registry.create(cwd, title)
@@ -342,12 +353,32 @@ export class DshAgentExecutor implements AgentExecutor {
   /**
    * Per-session sandbox cwd: every A2A session gets its own subdirectory under
    * the configured base, so the harness sandbox fence (workspace-write against
-   * SessionHeader.cwd) isolates each caller context's filesystem. The session
-   * id is `a2a-<hex>` — filesystem-safe by construction.
+   * SessionHeader.cwd) isolates each caller context's filesystem.
+   *
+   * Directory naming: `A2A_{caller}_{firstSeen}_{hash6}` — a readable slug of
+   * the caller's contextId, the session's first-seen timestamp, and 6 hash
+   * chars of the stable session id so slug collisions can never merge or
+   * split a caller's identity. Sessions minted before readable naming (raw
+   * session-id dirs) are adopted as-is, so live sessions never move.
    */
-  private sessionDir(sessionId: SessionId): string {
+  private sessionDir(sessionId: SessionId, contextId: string): string {
     const base = this.options.cwd ?? process.cwd()
-    return join(base, String(sessionId))
+    const sid = String(sessionId)
+    const legacy = join(base, sid)
+    if (existsSync(legacy)) return legacy
+    const hash6 = sid.slice(-6)
+    const pattern = new RegExp(`^A2A_.*_${hash6}$`)
+    try {
+      const hit = readdirSync(base).find((name) => pattern.test(name))
+      if (hit !== undefined) return join(base, hit)
+    } catch {
+      // base not readable yet — fall through to mint a new name
+    }
+    const slug = contextId.replace(/[^A-Za-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 24) || 'caller'
+    const d = new Date()
+    const pad = (n: number) => String(n).padStart(2, '0')
+    const stamp = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`
+    return join(base, `A2A_${slug}_${stamp}_${hash6}`)
   }
 
   private resolvePreset(presets: {
