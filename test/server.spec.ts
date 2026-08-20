@@ -11,7 +11,7 @@ import type { ExecutionEventBus } from '@a2a-js/sdk/server'
 import type { Context } from '@deepseek-ai/cordis'
 import { describe, expect, it } from 'vitest'
 import { resolveConfig } from '../src/config.js'
-import { DshAgentExecutor, textPart } from '../src/executor.js'
+import { DshAgentExecutor, sessionIdFor, textPart } from '../src/executor.js'
 import { A2aServer } from '../src/server.js'
 import { freePort } from './net.js'
 
@@ -357,7 +357,10 @@ describe('A2A server with a harness executor', () => {
       bus,
     )
     expect(creates[0]?.agentOptions).toEqual({ provider: 'test-provider', model: 'test-model' })
-    expect(creates[0]?.meta).toMatchObject({ cwd: '/tmp/a2a-ws-test', agentPreset: 'standard' })
+    expect(creates[0]?.meta).toMatchObject({
+      cwd: '/tmp/a2a-ws-test/' + String(sessionIdFor('ctx-1')),
+      agentPreset: 'standard',
+    })
   })
 
   it('validates the A2A workspace defaults and the provider/model pair', () => {

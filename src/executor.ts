@@ -12,6 +12,7 @@
 
 import { createHash, randomUUID } from 'node:crypto'
 import { mkdir } from 'node:fs/promises'
+import { join } from 'node:path'
 import type { Message, Part, Task, TaskState } from '@a2a-js/sdk'
 import { Role as RoleEnum, TaskState as TaskStateEnum } from '@a2a-js/sdk'
 import {
@@ -142,7 +143,7 @@ function status(
 export class DshAgentExecutor implements AgentExecutor {
   private readonly running = new Map<string, RunningTurn>()
   private presetPromise?: Promise<string>
-  private workspacePromise?: Promise<Workspace | undefined>
+  private workspacePromise?: Map<string, Promise<Workspace | undefined>>
 
   constructor(
     private readonly ctx: Context,
@@ -252,7 +253,7 @@ export class DshAgentExecutor implements AgentExecutor {
         }
       | undefined
     const presetId = presets === undefined ? undefined : await this.resolvePreset(presets)
-    const cwd = this.options.cwd ?? process.cwd()
+    const cwd = this.sessionDir(sessionId)
     await mkdir(cwd, { recursive: true })
     const handle = await this.ctx.agents.create({
       sessionId,
@@ -285,12 +286,15 @@ export class DshAgentExecutor implements AgentExecutor {
   }
 
   /**
-   * Best-effort attach of one A2A session to the "A2A" sidebar workspace.
-   * A session whose grouping fails must never fail the message itself.
+   * Best-effort attach of one A2A session to its per-session sidebar workspace.
+   * Each A2A session runs in its own cwd (see sessionDir), and workspace
+   * membership validates the session cwd against the workspace path, so the
+   * grouping workspace is per-session too — one sidebar row per A2A caller
+   * context. A session whose grouping fails must never fail the message itself.
    */
   async attachToWorkspace(sessionId: string): Promise<void> {
     try {
-      const workspace = await this.ensureWorkspace()
+      const workspace = await this.ensureWorkspace(sessionId)
       await workspace?.attachSession(sessionId)
     } catch (error) {
       this.ctx.logger.warn(`dsh-a2a: workspace attach failed for ${sessionId}: ${String(error)}`)
@@ -298,36 +302,52 @@ export class DshAgentExecutor implements AgentExecutor {
   }
 
   /**
-   * Resolve the grouping workspace once. Failures (including a not-yet-mounted
-   * registry) are forgotten so the next call retries instead of caching the
-   * miss forever.
+   * Resolve the per-session grouping workspace. Failures (including a
+   * not-yet-mounted registry) are forgotten so the next call retries instead of
+   * caching the miss forever.
    */
-  private ensureWorkspace(): Promise<Workspace | undefined> {
-    if (this.workspacePromise !== undefined) return this.workspacePromise
-    const current = this.openWorkspace().then(
+  private ensureWorkspace(sessionId: string): Promise<Workspace | undefined> {
+    this.workspacePromise ??= new Map()
+    const cached = this.workspacePromise.get(sessionId)
+    if (cached !== undefined) return cached
+    const current = this.openWorkspace(sessionId).then(
       (workspace) => {
-        if (workspace === undefined) this.forgetWorkspace(current)
+        if (workspace === undefined) this.forgetWorkspace(sessionId, current)
         return workspace
       },
       (error) => {
-        this.forgetWorkspace(current)
+        this.forgetWorkspace(sessionId, current)
         throw error
       },
     )
-    this.workspacePromise = current
+    this.workspacePromise.set(sessionId, current)
     return current
   }
 
-  private forgetWorkspace(current: Promise<Workspace | undefined>): void {
-    if (this.workspacePromise === current) this.workspacePromise = undefined
+  private forgetWorkspace(sessionId: string, current: Promise<Workspace | undefined>): void {
+    if (this.workspacePromise?.get(sessionId) === current) {
+      this.workspacePromise.delete(sessionId)
+    }
   }
 
-  private async openWorkspace(): Promise<Workspace | undefined> {
+  private async openWorkspace(sessionId: string): Promise<Workspace | undefined> {
     const registry = this.ctx.get('workspaceRegistry') as WorkspaceRegistry | undefined
     if (registry === undefined) return undefined
-    const cwd = this.options.cwd ?? process.cwd()
+    const cwd = this.sessionDir(SessionId(sessionId))
     await mkdir(cwd, { recursive: true })
-    return registry.create(cwd, this.options.workspaceTitle ?? 'A2A')
+    const title = `${this.options.workspaceTitle ?? 'A2A'} · ${sessionId}`
+    return registry.create(cwd, title)
+  }
+
+  /**
+   * Per-session sandbox cwd: every A2A session gets its own subdirectory under
+   * the configured base, so the harness sandbox fence (workspace-write against
+   * SessionHeader.cwd) isolates each caller context's filesystem. The session
+   * id is `a2a-<hex>` — filesystem-safe by construction.
+   */
+  private sessionDir(sessionId: SessionId): string {
+    const base = this.options.cwd ?? process.cwd()
+    return join(base, String(sessionId))
   }
 
   private resolvePreset(presets: {
