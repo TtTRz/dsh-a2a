@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-08-21
+
+### Added
+
+- Per-session sandbox cwd: every A2A caller context runs in its own
+  directory under the server base — `A2A-{caller}-{MMDD}-{hhmmss}-{id-tail}`
+  — so the harness sandbox fence isolates each caller's filesystem, with one
+  workspace row per session titled from the minted directory name
+  (`A2A · {caller} {MM-DD} {HH:mm:ss}`).
+
 ## [0.4.1] - 2026-08-19
 
 ### Changed
