@@ -346,7 +346,14 @@ export class DshAgentExecutor implements AgentExecutor {
     if (registry === undefined) return undefined
     const cwd = this.sessionDir(SessionId(sessionId), contextId ?? sessionId)
     await mkdir(cwd, { recursive: true })
-    const title = `${this.options.workspaceTitle ?? 'A2A'} · ${sessionId}`
+    const dirName = cwd.split('/').pop() ?? ''
+    const stripped = dirName.replace(/^A2A-/, '').replace(/-[^-]*$/, '')
+    const m = /^(.+)-(\d{4})-(\d{2})(\d{2})(\d{2})$/.exec(stripped)
+    const suffix =
+      m !== null && m[1] !== undefined && m[2] !== undefined && m[3] !== undefined && m[4] !== undefined && m[5] !== undefined
+        ? `${m[1]} ${m[2].slice(0, 2)}-${m[2].slice(2)} ${m[3]}:${m[4]}:${m[5]}`
+        : sessionId
+    const title = `${this.options.workspaceTitle ?? 'A2A'} · ${suffix}`
     return registry.create(cwd, title)
   }
 
@@ -375,7 +382,7 @@ export class DshAgentExecutor implements AgentExecutor {
     const slug = contextId.replace(/[^A-Za-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 24) || 'caller'
     const d = new Date()
     const pad = (n: number) => String(n).padStart(2, '0')
-    const stamp = `${pad(d.getMonth() + 1)}${pad(d.getDate())}`
+    const stamp = `${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`
     return join(base, `A2A-${slug}-${stamp}-${hash6}`)
   }
 
