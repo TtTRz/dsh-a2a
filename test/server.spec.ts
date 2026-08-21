@@ -358,7 +358,7 @@ describe('A2A server with a harness executor', () => {
     )
     expect(creates[0]?.agentOptions).toEqual({ provider: 'test-provider', model: 'test-model' })
     expect(creates[0]?.meta).toMatchObject({
-      cwd: '/tmp/a2a-ws-test/' + String(sessionIdFor('ctx-1')),
+      cwd: expect.stringMatching(/^\/tmp\/a2a-ws-test\/A2A-ctx-1-\d{4}-9fa507$/),
       agentPreset: 'standard',
     })
   })
