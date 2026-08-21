@@ -355,8 +355,8 @@ export class DshAgentExecutor implements AgentExecutor {
    * the configured base, so the harness sandbox fence (workspace-write against
    * SessionHeader.cwd) isolates each caller context's filesystem.
    *
-   * Directory naming: `A2A_{caller}_{firstSeen}_{hash6}` — a readable slug of
-   * the caller's contextId, the session's first-seen timestamp, and 6 hash
+   * Directory naming: `A2A-{caller}-{MMDD}-{hash6}` — a readable slug of
+   * the caller's contextId, the session's first-seen month-day, and 6 hash
    * chars of the stable session id so slug collisions can never merge or
    * split a caller's identity. Sessions minted before readable naming (raw
    * session-id dirs) are adopted as-is, so live sessions never move.
@@ -364,21 +364,19 @@ export class DshAgentExecutor implements AgentExecutor {
   private sessionDir(sessionId: SessionId, contextId: string): string {
     const base = this.options.cwd ?? process.cwd()
     const sid = String(sessionId)
-    const legacy = join(base, sid)
-    if (existsSync(legacy)) return legacy
     const hash6 = sid.slice(-6)
-    const pattern = new RegExp(`^A2A_.*_${hash6}$`)
+    const pattern = new RegExp(`^A2A-.*-${hash6}$`)
     try {
       const hit = readdirSync(base).find((name) => pattern.test(name))
       if (hit !== undefined) return join(base, hit)
     } catch {
       // base not readable yet — fall through to mint a new name
     }
-    const slug = contextId.replace(/[^A-Za-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 24) || 'caller'
+    const slug = contextId.replace(/[^A-Za-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 24) || 'caller'
     const d = new Date()
     const pad = (n: number) => String(n).padStart(2, '0')
-    const stamp = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`
-    return join(base, `A2A_${slug}_${stamp}_${hash6}`)
+    const stamp = `${pad(d.getMonth() + 1)}${pad(d.getDate())}`
+    return join(base, `A2A-${slug}-${stamp}-${hash6}`)
   }
 
   private resolvePreset(presets: {
