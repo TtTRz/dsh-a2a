@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Rendered image cards can now reach the A2A caller. When an agent turn renders
+  a card (e.g. the `render_card` tool), the executor collects the durable image
+  attachments from the tool-result events and publishes each as a file artifact
+  (raw PNG part, `image/png`) on the terminal status — before the terminal
+  `statusUpdate`, because the SDK ends the event stream there and anything
+  published after would never reach the caller. A card whose bytes cannot be
+  read is logged and skipped; the text reply still completes.
+
 ## [0.4.2] - 2026-08-21
 
 ### Added

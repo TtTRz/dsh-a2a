@@ -25,7 +25,7 @@ import { A2aRegistry, a2aTools } from './tools.js'
 import { A2aTestService, type ServerRef } from './typert.js'
 
 export const name = 'dsh-a2a'
-export const inject = ['agents', 'tools']
+export const inject = ['agents', 'tools', 'attachments']
 
 export { callAgent, DEFAULT_CALL_TIMEOUT_MS, resolveHeaders, textOfResult } from './client.js'
 export type {

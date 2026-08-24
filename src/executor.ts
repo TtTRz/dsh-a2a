@@ -24,6 +24,7 @@ import {
 } from '@a2a-js/sdk/server'
 import type { Context } from '@deepseek-ai/cordis'
 import { type Agent, installModelSelection } from '@deepseek-ai/dsh-agent'
+import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import { SessionId } from '@deepseek-ai/dsh-session'
@@ -78,6 +79,16 @@ export function textPart(text: string): Part {
   }
 }
 
+/** Build an A2A raw-file part (e.g. a rendered PNG card). */
+export function rawFilePart(data: Uint8Array, mediaType: string, filename: string): Part {
+  return {
+    content: { $case: 'raw', value: Buffer.from(data) },
+    metadata: undefined,
+    filename,
+    mediaType,
+  }
+}
+
 /** Build an A2A agent-role message carrying one text part. */
 export function agentMessage(text: string, taskId: string, contextId: string): Message {
   return {
@@ -101,6 +112,25 @@ export function textOf(message: Message): string {
     }
   }
   return parts.join('\n')
+}
+
+/**
+ * Collect the durable image attachment refs produced during one turn: cards
+ * rendered by tools (e.g. `render_card`) land as image blocks inside
+ * tool-result events. Returns them oldest-first.
+ */
+export function collectImageRefs(events: readonly SessionEvent[]): ImageAttachmentRef[] {
+  const images: ImageAttachmentRef[] = []
+  for (const event of events) {
+    if (event.type !== 'tool/result') continue
+    for (const block of event.data.message.content ?? []) {
+      if (block.type !== 'tool-result') continue
+      for (const inner of block.content) {
+        if (inner.type === 'image') images.push(inner.attachment)
+      }
+    }
+  }
+  return images
 }
 
 /** Collect the assistant text blocks of the session events written during a turn. */
@@ -186,10 +216,14 @@ export class DshAgentExecutor implements AgentExecutor {
         turn.agent.cancel({ kind: 'user' })
         throw new Error(`dsh-a2a: turn exceeded ${this.options.turnTimeoutMs}ms and was cancelled`)
       }
-      // The SDK's execution queue ends the event stream at the first terminal
-      // statusUpdate (or at a `message` event), so the reply must ride ON the
-      // terminal status: publishing a separate message first would strand the
-      // task in WORKING forever in the task store.
+      // Cards rendered during the turn (e.g. render_card tool) ship as file
+      // artifacts BEFORE the terminal status: the SDK's execution queue ends
+      // the event stream at the first terminal statusUpdate, so artifacts
+      // published afterwards would never reach the caller.
+      await this.publishCardArtifacts(eventBus, taskId, contextId, turn.agent.session.events)
+      // The reply must ride ON the terminal status: publishing a separate
+      // message first would strand the task in WORKING forever in the task
+      // store.
       eventBus.publish(
         AgentEvent.statusUpdate({
           taskId,
@@ -230,6 +264,55 @@ export class DshAgentExecutor implements AgentExecutor {
         metadata: {},
       }),
     )
+  }
+
+  /**
+   * Publish each rendered card as one file artifact (raw PNG part). A card
+   * whose bytes cannot be read is logged and skipped; the text reply still
+   * completes the task.
+   */
+  private async publishCardArtifacts(
+    eventBus: ExecutionEventBus,
+    taskId: string,
+    contextId: string,
+    events: readonly SessionEvent[],
+  ): Promise<void> {
+    const refs = collectImageRefs(events)
+    if (refs.length === 0) return
+    const attachments = (
+      this.ctx as unknown as {
+        attachments?: {
+          readImage(ref: ImageAttachmentRef): Promise<{ data: Uint8Array; ref: ImageAttachmentRef }>
+        }
+      }
+    ).attachments
+    if (attachments === undefined) return
+    for (const [index, ref] of refs.entries()) {
+      try {
+        const stored = await attachments.readImage(ref)
+        eventBus.publish(
+          AgentEvent.artifactUpdate({
+            taskId,
+            contextId,
+            append: false,
+            lastChunk: true,
+            metadata: undefined,
+            artifact: {
+              artifactId: randomUUID(),
+              name: `card-${index + 1}`,
+              description: 'Rendered summary card',
+              parts: [rawFilePart(stored.data, ref.mediaType, `card-${index + 1}.png`)],
+              metadata: undefined,
+              extensions: [],
+            },
+          }),
+        )
+      } catch (error) {
+        this.ctx.logger.warn(
+          `dsh-a2a: card artifact ${index + 1} could not be read: ${String(error)}`,
+        )
+      }
+    }
   }
 
   /** Adopt the live agent for a session, or create one with the preset mounted. */
