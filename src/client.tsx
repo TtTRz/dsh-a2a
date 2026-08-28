@@ -1101,8 +1101,9 @@ function ServerInfoPanel(props: { remote: RemoteLike; scope: ScopeLike }): React
   const [loading, setLoading] = useState(true)
   const [failed, setFailed] = useState(false)
   const [copied, setCopied] = useState(false)
-  const [nameDraft, setNameDraft] = useState<string | null>(null)
-  const [descDraft, setDescDraft] = useState<string | null>(null)
+  const [identityRows, setIdentityRows] = useState<
+    Array<{ id: string; name: string; description: string }>
+  >([])
   const [savingIdentity, setSavingIdentity] = useState(false)
   const [editingIdentity, setEditingIdentity] = useState(false)
   const refreshServerInfo = useCallback(async (): Promise<void> => {
@@ -1155,7 +1156,7 @@ function ServerInfoPanel(props: { remote: RemoteLike; scope: ScopeLike }): React
       <p style={valueStyle}>{value}</p>
     </div>
   )
-  const currentCard = snapshot.value?.serverAgents?.[0]
+  const serverAgents = snapshot.value?.serverAgents ?? []
   const cardBase =
     info !== null && info.enabled
       ? (info.publicUrl ?? `http://${info.host}:${String(info.port)}/`)
@@ -1173,20 +1174,12 @@ function ServerInfoPanel(props: { remote: RemoteLike; scope: ScopeLike }): React
       setTimeout(() => setCopied(false), 2000)
     })
   }
-  const identityDirty = nameDraft !== null || descDraft !== null
+  const identityDirty = JSON.stringify(identityRows) !== JSON.stringify(serverAgents)
   const saveIdentity = async (): Promise<void> => {
     if (savingIdentity) return
     setSavingIdentity(true)
     try {
-      await scope.set('serverAgents', [
-        {
-          id: currentCard?.id ?? 'agent',
-          name: nameDraft ?? currentCard?.name ?? '',
-          description: descDraft ?? currentCard?.description ?? '',
-        },
-      ])
-      setNameDraft(null)
-      setDescDraft(null)
+      await scope.set('serverAgents', identityRows)
       setEditingIdentity(false)
       setLoading(true)
       setFailed(false)
@@ -1202,8 +1195,6 @@ function ServerInfoPanel(props: { remote: RemoteLike; scope: ScopeLike }): React
     setSavingIdentity(true)
     try {
       await scope.unset('serverAgents')
-      setNameDraft(null)
-      setDescDraft(null)
       setEditingIdentity(false)
       setLoading(true)
       setFailed(false)
@@ -1336,37 +1327,64 @@ function ServerInfoPanel(props: { remote: RemoteLike; scope: ScopeLike }): React
                           {t.identityReset}
                         </Button>
                       ) : null}
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => {
-                          setNameDraft(null)
-                          setDescDraft(null)
-                          setEditingIdentity(false)
-                        }}
-                      >
+                      <Button variant="ghost" size="sm" onClick={() => setEditingIdentity(false)}>
                         {t.discard}
                       </Button>
                     </div>
                   </div>
-                  <label style={itemStyle}>
-                    <span style={labelStyle2}>{t.identityName}</span>
-                    <input
-                      style={inputStyle2}
-                      value={nameDraft ?? currentCard?.name ?? ''}
-                      placeholder={t.identityName}
-                      onChange={(event) => setNameDraft(event.target.value)}
-                    />
-                  </label>
-                  <label style={itemStyle}>
-                    <span style={labelStyle2}>{t.identityDescription}</span>
-                    <input
-                      style={inputStyle2}
-                      value={descDraft ?? currentCard?.description ?? ''}
-                      placeholder={t.identityDescription}
-                      onChange={(event) => setDescDraft(event.target.value)}
-                    />
-                  </label>
+                  {serverAgents.map((entry, index) => {
+                    const row = identityRows[index] ?? {
+                      id: entry.id ?? '',
+                      name: '',
+                      description: '',
+                    }
+                    return (
+                      <div
+                        key={entry.id ?? String(index)}
+                        style={{
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '6px',
+                          padding: '8px 0',
+                          borderTop: `1px dashed ${cssVars.borderL1}`,
+                        }}
+                      >
+                        <span style={{ fontSize: '11px', color: cssVars.labelTertiary }}>
+                          /agents/{entry.id}
+                        </span>
+                        <label style={itemStyle}>
+                          <span style={labelStyle2}>{t.identityName}</span>
+                          <input
+                            style={inputStyle2}
+                            value={row.name}
+                            placeholder={t.identityName}
+                            onChange={(event) =>
+                              setIdentityRows((current) =>
+                                current.map((r, i) =>
+                                  i === index ? { ...r, name: event.target.value } : r,
+                                ),
+                              )
+                            }
+                          />
+                        </label>
+                        <label style={itemStyle}>
+                          <span style={labelStyle2}>{t.identityDescription}</span>
+                          <input
+                            style={inputStyle2}
+                            value={row.description}
+                            placeholder={t.identityDescription}
+                            onChange={(event) =>
+                              setIdentityRows((current) =>
+                                current.map((r, i) =>
+                                  i === index ? { ...r, description: event.target.value } : r,
+                                ),
+                              )
+                            }
+                          />
+                        </label>
+                      </div>
+                    )
+                  })}
                   <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
                     <Button
                       variant="primary"
@@ -1413,25 +1431,48 @@ function ServerInfoPanel(props: { remote: RemoteLike; scope: ScopeLike }): React
                         </span>
                       ) : null}
                     </span>
-                    <Button variant="ghost" size="sm" onClick={() => setEditingIdentity(true)}>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setIdentityRows(
+                          serverAgents.map((a) => ({
+                            id: a.id ?? '',
+                            name: a.name ?? '',
+                            description: a.description ?? '',
+                          })),
+                        )
+                        setEditingIdentity(true)
+                      }}
+                    >
                       {t.identityEdit}
                     </Button>
                   </div>
-                  <p style={{ margin: 0, fontSize: '13px', color: cssVars.labelPrimary }}>
-                    {currentCard?.name ?? info.agentCard.name}
-                  </p>
-                  {(currentCard?.description ?? info.agentCard.description).length > 0 ? (
-                    <p
-                      style={{
-                        margin: 0,
-                        fontSize: '12px',
-                        lineHeight: 1.5,
-                        color: cssVars.labelTertiary,
-                      }}
+                  {serverAgents.map((agent) => (
+                    <div
+                      key={agent.id}
+                      style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}
                     >
-                      {currentCard?.description ?? info.agentCard.description}
-                    </p>
-                  ) : null}
+                      <span style={{ fontSize: '11px', color: cssVars.labelTertiary }}>
+                        /agents/{agent.id}
+                      </span>
+                      <p style={{ margin: 0, fontSize: '13px', color: cssVars.labelPrimary }}>
+                        {agent.name?.length > 0 ? agent.name : agent.id}
+                      </p>
+                      {agent.description && agent.description.length > 0 ? (
+                        <p
+                          style={{
+                            margin: 0,
+                            fontSize: '12px',
+                            lineHeight: 1.5,
+                            color: cssVars.labelTertiary,
+                          }}
+                        >
+                          {agent.description}
+                        </p>
+                      ) : null}
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
