@@ -56,7 +56,7 @@ interface ScopeLike {
     value:
       | {
           agents?: StoredAgent[]
-          agentCard?: { name: string; description: string }
+          serverAgents?: Array<{ id?: string; name?: string; description?: string }>
         }
       | undefined
     user: unknown
@@ -1155,7 +1155,7 @@ function ServerInfoPanel(props: { remote: RemoteLike; scope: ScopeLike }): React
       <p style={valueStyle}>{value}</p>
     </div>
   )
-  const currentCard = snapshot.value?.agentCard
+  const currentCard = snapshot.value?.serverAgents?.[0]
   const cardBase =
     info !== null && info.enabled
       ? (info.publicUrl ?? `http://${info.host}:${String(info.port)}/`)
@@ -1178,10 +1178,13 @@ function ServerInfoPanel(props: { remote: RemoteLike; scope: ScopeLike }): React
     if (savingIdentity) return
     setSavingIdentity(true)
     try {
-      await scope.set('agentCard', {
-        name: nameDraft ?? currentCard?.name ?? '',
-        description: descDraft ?? currentCard?.description ?? '',
-      })
+      await scope.set('serverAgents', [
+        {
+          id: currentCard?.id ?? 'agent',
+          name: nameDraft ?? currentCard?.name ?? '',
+          description: descDraft ?? currentCard?.description ?? '',
+        },
+      ])
       setNameDraft(null)
       setDescDraft(null)
       setEditingIdentity(false)
@@ -1198,7 +1201,7 @@ function ServerInfoPanel(props: { remote: RemoteLike; scope: ScopeLike }): React
     if (savingIdentity) return
     setSavingIdentity(true)
     try {
-      await scope.unset('agentCard')
+      await scope.unset('serverAgents')
       setNameDraft(null)
       setDescDraft(null)
       setEditingIdentity(false)
@@ -1328,7 +1331,7 @@ function ServerInfoPanel(props: { remote: RemoteLike; scope: ScopeLike }): React
                       {snapshot.user !== undefined &&
                       snapshot.user !== null &&
                       typeof snapshot.user === 'object' &&
-                      'agentCard' in (snapshot.user as Record<string, unknown>) ? (
+                      'serverAgents' in (snapshot.user as Record<string, unknown>) ? (
                         <Button variant="ghost" size="sm" onClick={() => void resetIdentity()}>
                           {t.identityReset}
                         </Button>
