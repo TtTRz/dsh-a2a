@@ -32,7 +32,7 @@ import {
   JsonRpcTransportHandler,
   ServerCallContext,
 } from '@a2a-js/sdk/server'
-import type { ResolvedServer } from './config.js'
+import type { ResolvedAgentSpec, ResolvedServer } from './config.js'
 
 const MAX_BODY_BYTES = 16 * 1024 * 1024
 const SSE_HEADERS = {
@@ -47,29 +47,39 @@ export type RequestObserver = (req: IncomingMessage) => void
 
 export interface A2aServerOptions {
   config: ResolvedServer
-  executor: AgentExecutor
+  /** One executor per local agent, named by its URL slug. */
+  agents: Array<{ agent: ResolvedAgentSpec; executor: AgentExecutor }>
   /** Optional per-request hook (observability, tests). */
   onRequest?: RequestObserver
 }
 
 /** Build the Agent Card advertised on `GET /.well-known/agent-card.json`. */
-export function buildAgentCard(config: ResolvedServer, baseUrl: string): AgentCard {
+export function buildAgentCard(
+  config: ResolvedServer,
+  serverRootUrl: string,
+  agent?: ResolvedAgentSpec,
+  agentUrl?: string,
+): AgentCard {
+  const name = agent?.name ?? config.agentCard.name
+  const description = agent?.description ?? config.agentCard.description
+  const version = agent?.version ?? config.agentCard.version
+  const endpoint = agentUrl ?? serverRootUrl
   const interfaceShape = {
-    url: baseUrl,
+    url: endpoint,
     protocolVersion: A2A_PROTOCOL_VERSION,
     tenant: '',
   }
   return {
-    name: config.agentCard.name,
-    description: config.agentCard.description,
-    version: config.agentCard.version,
+    name,
+    description,
+    version,
     supportedInterfaces: [
       { ...interfaceShape, protocolBinding: 'JSONRPC' },
       { ...interfaceShape, protocolBinding: 'HTTP+JSON' },
     ],
     provider: {
       organization: 'dsh-a2a',
-      url: baseUrl,
+      url: serverRootUrl,
     },
     capabilities: {
       streaming: true,
@@ -113,49 +123,52 @@ function restBody(raw: unknown): SendMessageRequest {
   }
 }
 
+/** One local agent route: its card + SDK handler + the sub-path it owns. */
+interface AgentRoute {
+  id: string
+  card: AgentCard
+  handler: DefaultRequestHandler
+  /** URL-safe base path, e.g. `/agents/mp-perf`. */
+  basePath: string
+}
+
 /**
- * The A2A HTTP endpoint. `start()` binds the port; `stop()` closes the
- * listener and destroys open sockets. Thread-safe for one server instance
- * per plugin fiber (created and stopped through `ctx.effect`).
+ * A multi-agent A2A endpoint: one Node HTTP listener that serves several local
+ * agents, each at `/agents/<id>/...` with its own Agent Card and preset-backed
+ * executor. `/.well-known/agent-card.json` lists them (there is no default
+ * agent at `/`), so an A2A client addresses a specific agent by path.
  */
 export class A2aServer {
   private http: HttpServer | undefined
   private readonly sockets = new Set<import('node:net').Socket>()
-  private jsonRpc!: JsonRpcTransportHandler
-  private requestHandler!: DefaultRequestHandler
-  private readonly taskStore = new InMemoryTaskStore()
-  private card: AgentCard
+  private readonly routes = new Map<string, AgentRoute>()
+  private readonly cards: AgentCard[] = []
 
   constructor(private readonly options: A2aServerOptions) {
-    this.card = buildAgentCard(options.config, this.url)
-    this.rebuildHandlers()
-  }
-
-  /** Re-point the SDK handlers at the current card; tasks and the executor survive. */
-  private rebuildHandlers(): void {
-    this.requestHandler = new DefaultRequestHandler(
-      this.card,
-      this.taskStore,
-      this.options.executor,
-    )
-    this.jsonRpc = new JsonRpcTransportHandler(this.requestHandler)
-  }
-
-  /**
-   * Hot-apply a settings-sourced Agent Card identity override (name /
-   * description). In-flight tasks keep running — only the discovery card and
-   * subsequent handler responses change.
-   */
-  updateCard(patch: { name?: string; description?: string }): void {
-    this.card = {
-      ...this.card,
-      name: patch.name ?? this.card.name,
-      description: patch.description ?? this.card.description,
+    for (const { agent, executor } of options.agents) {
+      const basePath = `/agents/${agent.id}`
+      // Server-root provider URL + per-agent endpoint URL: A2A clients read
+      // `supportedInterfaces[].url` to pick the transport endpoint, so each
+      // card must point at ITS OWN `/agents/<id>/` (there is no `/` agent).
+      const card = buildAgentCard(options.config, this.url, agent, this.urlFor(basePath))
+      const handler = new DefaultRequestHandler(card, new InMemoryTaskStore(), executor)
+      this.routes.set(agent.id, { id: agent.id, card, handler, basePath })
+      this.cards.push(card)
     }
-    this.rebuildHandlers()
   }
 
-  private boundUrl: string | undefined
+  /** Agent Card identity for one agent (from its executor/options). */
+  private urlFor(basePath: string): string {
+    const publicUrl = this.options.config.publicUrl
+    if (publicUrl !== undefined && publicUrl.length > 0) {
+      return `${publicUrl.replace(/\/$/, '')}${basePath}/`
+    }
+    return `http://${this.options.config.host}:${this.options.config.port}${basePath}/`
+  }
+
+  private get boundUrl(): string {
+    return this.urlFor('')
+  }
 
   /** The agent's base URL: the configured public URL, else the bound address. */
   get url(): string {
@@ -164,6 +177,18 @@ export class A2aServer {
       this.boundUrl ??
       `http://${this.options.config.host}:${this.options.config.port}/`
     )
+  }
+
+  /** Hot-apply a settings-sourced Agent Card override to the first agent. */
+  updateCard(patch: { name?: string; description?: string }): void {
+    const first = [...this.routes.values()][0]
+    if (first === undefined) return
+    first.card = {
+      ...first.card,
+      name: patch.name ?? first.card.name,
+      description: patch.description ?? first.card.description,
+    }
+    if (this.cards.length > 0) this.cards[0] = first.card
   }
 
   /** Bind the configured port; resolves once listening. */
@@ -179,12 +204,6 @@ export class A2aServer {
       http.once('error', reject)
       http.listen(this.options.config.port, this.options.config.host, resolve)
     })
-    const address = http.address()
-    if (address !== null && typeof address === 'object') {
-      const port = address.port
-      const host = this.options.config.host === '0.0.0.0' ? '127.0.0.1' : this.options.config.host
-      this.boundUrl = `http://${host}:${port}/`
-    }
   }
 
   /** Close the listener and destroy open sockets; idempotent. */
@@ -200,86 +219,99 @@ export class A2aServer {
   private async route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     this.options.onRequest?.(req)
     const url = new URL(req.url ?? '/', this.url)
+    const path = url.pathname
     try {
-      // The Agent Card stays public for discovery; every other request must
-      // present the configured API key as a Bearer token (when one is set).
-      const isCard = req.method === 'GET' && url.pathname === `/${AGENT_CARD_PATH}`
-      if (!isCard && this.options.config.apiKey !== undefined) {
+      const isDiscovery = req.method === 'GET' && path === `/${AGENT_CARD_PATH}`
+      if (isDiscovery) {
+        // A2A v1.0 discovery: a single Agent Card. We serve the first local
+        // agent's card here (there is no agent mounted at `/`); every agent is
+        // addressed by path at `/agents/<id>`.
+        const first = [...this.routes.values()][0]
+        sendJson(res, 200, first === undefined ? { name: 'dsh-a2a' } : first.card)
+        return
+      }
+      if (!isDiscovery && this.options.config.apiKey !== undefined) {
         const expected = `Bearer ${this.options.config.apiKey}`
         if (req.headers.authorization !== expected) {
           sendJson(res, 401, { error: 'unauthorized' })
           return
         }
       }
-      if (isCard) {
-        sendJson(res, 200, await this.requestHandler.getAgentCard())
+      const match = /^\/agents\/([^/]+)(\/.*)?$/.exec(path)
+      if (match === null || match[1] === undefined) {
+        sendJson(res, 404, { error: 'not found' })
         return
       }
-      if (req.method === 'POST' && url.pathname === '/') {
-        await this.handleJsonRpc(req, res)
+      const route = this.routes.get(decodeURIComponent(match[1]))
+      if (route === undefined) {
+        sendJson(res, 404, { error: `unknown agent` })
         return
       }
-      if (req.method === 'POST' && url.pathname === '/message:send') {
-        const body = await readBody(req)
-        sendJson(
-          res,
-          200,
-          await this.requestHandler.sendMessage(restBody(body), new ServerCallContext()),
-        )
+      const sub = (match[2] ?? '').replace(/^\/+|\/+$/g, '')
+      if (req.method === 'GET' && sub === AGENT_CARD_PATH) {
+        sendJson(res, 200, route.card)
         return
       }
-      if (req.method === 'GET' && url.pathname === '/tasks') {
-        sendJson(
-          res,
-          200,
-          await this.requestHandler.listTasks(
-            {
-              tenant: '',
-              contextId: '',
-              status: TaskStateEnum.TASK_STATE_UNSPECIFIED,
-              pageToken: '',
-              statusTimestampAfter: '',
-            },
-            new ServerCallContext(),
-          ),
-        )
-        return
-      }
-      const taskMatch = url.pathname.match(/^\/tasks\/([^/]+)(?::cancel)?$/)
-      if (taskMatch !== null && taskMatch[1] !== undefined) {
-        const taskId = decodeURIComponent(taskMatch[1])
-        if (req.method === 'GET' && !url.pathname.endsWith(':cancel')) {
-          sendJson(
-            res,
-            200,
-            await this.requestHandler.getTask({ id: taskId, tenant: '' }, new ServerCallContext()),
-          )
-          return
-        }
-        if (req.method === 'POST' && url.pathname.endsWith(':cancel')) {
-          sendJson(
-            res,
-            200,
-            await this.requestHandler.cancelTask(
-              { id: taskId, tenant: '', metadata: undefined },
-              new ServerCallContext(),
-            ),
-          )
-          return
-        }
-      }
-      sendJson(res, 404, { error: 'not found' })
+      await this.handleAgent(route, sub, req, res)
     } catch (error) {
       sendJson(res, 400, { error: String(error instanceof Error ? error.message : error) })
     }
   }
 
-  private async handleJsonRpc(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  private async handleAgent(
+    route: AgentRoute,
+    sub: string,
+    req: IncomingMessage,
+    res: ServerResponse,
+  ): Promise<void> {
+    const jsonRpc = new JsonRpcTransportHandler(route.handler)
+    if (req.method === 'POST' && sub === '') {
+      await this.handleJsonRpc(jsonRpc, req, res)
+      return
+    }
+    if (req.method === 'POST' && sub === 'message:send') {
+      const body = await readBody(req)
+      sendJson(
+        res,
+        200,
+        await route.handler.sendMessage(restBody(body), new ServerCallContext()),
+      )
+      return
+    }
+    if (req.method === 'GET' && sub === 'tasks') {
+      sendJson(
+        res,
+        200,
+        await route.handler.listTasks(
+          { tenant: '', contextId: '', status: TaskStateEnum.TASK_STATE_UNSPECIFIED, pageToken: '', statusTimestampAfter: '' },
+          new ServerCallContext(),
+        ),
+      )
+      return
+    }
+    const taskMatch = /^tasks\/([^/]+)(?::cancel)?$/.exec(sub)
+    if (taskMatch !== null && taskMatch[1] !== undefined) {
+      const taskId = decodeURIComponent(taskMatch[1])
+      if (req.method === 'GET' && !sub.endsWith(':cancel')) {
+        sendJson(res, 200, await route.handler.getTask({ id: taskId, tenant: '' }, new ServerCallContext()))
+        return
+      }
+      if (req.method === 'POST' && sub.endsWith(':cancel')) {
+        sendJson(res, 200, await route.handler.cancelTask({ id: taskId, tenant: '', metadata: undefined }, new ServerCallContext()))
+        return
+      }
+    }
+    sendJson(res, 404, { error: 'not found' })
+  }
+
+  private async handleJsonRpc(
+    jsonRpc: JsonRpcTransportHandler,
+    req: IncomingMessage,
+    res: ServerResponse,
+  ): Promise<void> {
     const body = (await readBody(req)).toString('utf8')
-    const outcome = await this.jsonRpc.handle(body, new ServerCallContext())
+    const outcome = await jsonRpc.handle(body, new ServerCallContext())
     if (isAsyncGenerator(outcome)) {
-      // Peek the first event before committing to SSE, so an early failure
-      // surfaces as a plain JSON-RPC error instead of a broken stream.
       const iterator = outcome[Symbol.asyncIterator]()
       let first: IteratorResult<unknown>
       try {
@@ -299,9 +331,7 @@ export class A2aServer {
           res.write(`data: ${JSON.stringify(next.value)}\n\n`)
         }
       } catch (error) {
-        res.write(
-          `event: error\ndata: ${JSON.stringify({ code: -32603, message: String(error) })}\n\n`,
-        )
+        res.write(`event: error\ndata: ${JSON.stringify({ code: -32603, message: String(error) })}\n\n`)
       }
       res.end()
       return

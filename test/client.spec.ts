@@ -21,6 +21,8 @@ import { A2aServer } from '../src/server.js'
 import { A2aRegistry, a2aTools } from '../src/tools.js'
 import { freePort } from './net.js'
 
+const testAgent = { id: 'test', name: 'test-agent', description: 'test', version: '0.1.0', preset: 'standard', cwd: '/tmp', workspaceTitle: 'A2A' }
+
 const observedHeaders: string[] = []
 
 /** Echo executor: replies with the received text, records nothing secret. */
@@ -68,7 +70,7 @@ async function startEchoServer(): Promise<A2aServer> {
   const port = await freePort()
   const created = new A2aServer({
     config: resolveConfig({ server: { host: '127.0.0.1', port } }).server,
-    executor: echoExecutor,
+    agents: [{ agent: testAgent, executor: echoExecutor }],
     onRequest: (req: IncomingMessage) => {
       observedHeaders.push(req.headers.authorization ?? '')
     },
@@ -88,7 +90,7 @@ describe('callAgent', () => {
   it('round-trips a prompt through a real A2A endpoint', async () => {
     server = await startEchoServer()
     const reply = await callAgent(
-      { name: 'echo', url: server.url, headers: {}, description: '' },
+      { name: 'echo', url: `${server.url}agents/test/`, headers: {}, description: '' },
       '你好',
       { timeoutMillis: 10_000 },
     )
@@ -102,7 +104,7 @@ describe('callAgent', () => {
     await callAgent(
       {
         name: 'echo',
-        url: server.url,
+        url: `${server.url}agents/test/`,
         // biome-ignore lint/suspicious/noTemplateCurlyInString: ${ENV} placeholder syntax is intentional
         headers: { authorization: 'Bearer ${MOCK_TOKEN}' },
         description: '',
@@ -127,10 +129,10 @@ describe('resolveHeaders', () => {
 })
 
 describe('baseUrlOf', () => {
-  it('keeps a bare base URL unchanged', () => {
-    expect(baseUrlOf('http://host:18878/')).toBe('http://host:18878')
+  it('keeps a bare base URL unchanged (trailing slash retained for the SDK)', () => {
+    expect(baseUrlOf('http://host:18878/')).toBe('http://host:18878/')
     expect(baseUrlOf('http://host:18878')).toBe('http://host:18878')
-    expect(baseUrlOf('http://host/base/')).toBe('http://host/base')
+    expect(baseUrlOf('http://host/base/')).toBe('http://host/base/')
   })
 
   it('strips a full agent-card path down to the base', () => {
@@ -176,7 +178,7 @@ describe('a2aTools', () => {
   it('lists registry entries and calls a remote agent', async () => {
     server = await startEchoServer()
     const registry = new A2aRegistry([
-      { name: 'echo', url: server.url, headers: {}, description: 'an echo agent' },
+      { name: 'echo', url: `${server.url}agents/test/`, headers: {}, description: 'an echo agent' },
     ])
     const tools = a2aTools(registry, { callTimeoutMs: 10_000 })
 

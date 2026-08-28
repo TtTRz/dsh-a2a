@@ -15,6 +15,8 @@ import { DshAgentExecutor, sessionIdFor, textPart } from '../src/executor.js'
 import { A2aServer } from '../src/server.js'
 import { freePort } from './net.js'
 
+const testAgent = { id: 'test', name: 'test-agent', description: 'test', version: '0.1.0', preset: 'standard', cwd: '/tmp', workspaceTitle: 'A2A' }
+
 interface SessionEventLike {
   type: string
   data: unknown
@@ -129,12 +131,12 @@ describe('A2A server with a harness executor', () => {
     const port = await freePort()
     const agents = new Map<string, FakeAgent>()
     const ctx = fakeCtx(agents)
-    const executor = new DshAgentExecutor(ctx, { preset: 'standard', turnTimeoutMs: 10_000 })
+    const executor = new DshAgentExecutor(ctx, { agentId: 'test', preset: 'standard', turnTimeoutMs: 10_000 })
     const server = new A2aServer({
       config: resolveConfig({
         server: { host: '127.0.0.1', port, agentCard: { name: 'test-agent' } },
       }).server,
-      executor,
+      agents: [{ agent: testAgent, executor }],
     })
     await server.start()
     try {
@@ -145,7 +147,7 @@ describe('A2A server with a harness executor', () => {
       expect(card.name).toBe('test-agent')
 
       // Blocking SendMessage through the official client.
-      const client = await new ClientFactory(ClientFactoryOptions.default).createFromUrl(server.url)
+      const client = await new ClientFactory(ClientFactoryOptions.default).createFromUrl(`${server.url}agents/test/`)
       const result = await client.sendMessage({
         tenant: '',
         message: userMessage('hello'),
@@ -170,17 +172,16 @@ describe('A2A server with a harness executor', () => {
   it('keeps per-context sessions and continues the same agent', async () => {
     const port = await freePort()
     const agents = new Map<string, FakeAgent>()
-    const executor = new DshAgentExecutor(fakeCtx(agents), {
-      preset: 'standard',
+    const executor = new DshAgentExecutor(fakeCtx(agents), { agentId: 'test', preset: 'standard',
       turnTimeoutMs: 10_000,
     })
     const server = new A2aServer({
       config: resolveConfig({ server: { host: '127.0.0.1', port } }).server,
-      executor,
+      agents: [{ agent: testAgent, executor }],
     })
     await server.start()
     try {
-      const client = await new ClientFactory(ClientFactoryOptions.default).createFromUrl(server.url)
+      const client = await new ClientFactory(ClientFactoryOptions.default).createFromUrl(`${server.url}agents/test/`)
       const message = (text: string): Message => ({
         ...userMessage(text),
         messageId: Math.random().toString(),
@@ -211,7 +212,7 @@ describe('A2A server with a harness executor', () => {
     const port = await freePort()
     const agents = new Map<string, FakeAgent>()
     const ctx = fakeCtx(agents)
-    const executor = new DshAgentExecutor(ctx, { preset: 'standard', turnTimeoutMs: 10_000 })
+    const executor = new DshAgentExecutor(ctx, { agentId: 'test', preset: 'standard', turnTimeoutMs: 10_000 })
     const { bus, events } = collectingBus()
     const hanging = new FakeAgent()
     hanging.hang = true
@@ -249,10 +250,10 @@ describe('A2A server with a harness executor', () => {
 
   it('enforces the configured API key on everything but the Agent Card', async () => {
     const port = await freePort()
-    const executor = new DshAgentExecutor(fakeCtx(), { preset: 'standard', turnTimeoutMs: 10_000 })
+    const executor = new DshAgentExecutor(fakeCtx(), { agentId: 'test', preset: 'standard', turnTimeoutMs: 10_000 })
     const server = new A2aServer({
       config: resolveConfig({ server: { host: '127.0.0.1', port, apiKey: 'secret' } }).server,
-      executor,
+      agents: [{ agent: testAgent, executor }],
     })
     await server.start()
     try {
@@ -270,21 +271,21 @@ describe('A2A server with a harness executor', () => {
         message: { role: 'user', parts: [{ type: 'text', text: 'hi' }] },
       })
       // No credentials → 401.
-      const noAuth = await fetch(`${server.url}message:send`, {
+      const noAuth = await fetch(`${server.url}agents/test/message:send`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body,
       })
       expect(noAuth.status).toBe(401)
       // Wrong credentials → 401.
-      const badAuth = await fetch(`${server.url}message:send`, {
+      const badAuth = await fetch(`${server.url}agents/test/message:send`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer wrong' },
         body,
       })
       expect(badAuth.status).toBe(401)
       // Correct credentials pass the fence (the business reply may still vary).
-      const goodAuth = await fetch(`${server.url}message:send`, {
+      const goodAuth = await fetch(`${server.url}agents/test/message:send`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer secret' },
         body,
@@ -297,12 +298,12 @@ describe('A2A server with a harness executor', () => {
 
   it('advertises the configured public URL on the Agent Card', async () => {
     const port = await freePort()
-    const executor = new DshAgentExecutor(fakeCtx(), { preset: 'standard', turnTimeoutMs: 10_000 })
+    const executor = new DshAgentExecutor(fakeCtx(), { agentId: 'test', preset: 'standard', turnTimeoutMs: 10_000 })
     const server = new A2aServer({
       config: resolveConfig({
         server: { host: '127.0.0.1', port, publicUrl: 'https://agents.example.com/' },
       }).server,
-      executor,
+      agents: [{ agent: testAgent, executor }],
     })
     await server.start()
     try {
@@ -334,8 +335,7 @@ describe('A2A server with a harness executor', () => {
       const agent = new FakeAgent()
       return { agent, dispose: async () => undefined }
     }
-    const executor = new DshAgentExecutor(ctx, {
-      preset: 'standard',
+    const executor = new DshAgentExecutor(ctx, { agentId: 'test', preset: 'standard',
       turnTimeoutMs: 10_000,
       cwd: '/tmp/a2a-ws-test',
       workspaceTitle: 'A2A',
