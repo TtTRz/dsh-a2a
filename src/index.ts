@@ -53,30 +53,35 @@ export {
 /** Mount the A2A endpoint and the model-facing tools, tied to the Cordis lifecycle. */
 export function apply(ctx: Context, config: PluginConfig): void {
   const resolved = resolveConfig(config)
+  const primaryCard = resolved.server.agents[0]
   // Host-side Remote surface for the settings tab (agent-card probe + server
   // summary). Reads through a mutable ref so settings-sourced Agent Card
   // overrides show up in serverInfo without a restart.
   const serverRef: ServerRef = {
     server: resolved.server.enabled ? resolved.server : undefined,
     agentCard: {
-      name: resolved.server.agentCard.name,
-      description: resolved.server.agentCard.description,
+      name: primaryCard?.name ?? resolved.server.agentCard.name,
+      description: primaryCard?.description ?? resolved.server.agentCard.description,
     },
   }
   new A2aTestService(ctx, serverRef)
   let server: A2aServer | undefined
-  if (resolved.server.enabled) {
-    const executor = new DshAgentExecutor(ctx, {
-      preset: resolved.server.preset,
+  const executors = resolved.server.agents.map((agent) => ({
+    agent,
+    executor: new DshAgentExecutor(ctx, {
+      agentId: agent.id,
+      preset: agent.preset,
       turnTimeoutMs: resolved.server.turnTimeoutMs,
-      cwd: resolved.server.cwd,
-      workspaceTitle: resolved.server.workspaceTitle,
-      provider: resolved.server.provider,
-      model: resolved.server.model,
-    })
+      cwd: agent.cwd,
+      workspaceTitle: agent.workspaceTitle,
+      provider: agent.provider,
+      model: agent.model,
+    }),
+  }))
+  if (resolved.server.enabled) {
     server = new A2aServer({
       config: resolved.server,
-      executor,
+      agents: executors.map(({ agent, executor }) => ({ agent, executor })),
     })
     const bound = server
     ctx.effect(() => {
@@ -89,11 +94,11 @@ export function apply(ctx: Context, config: PluginConfig): void {
       }
     }, 'dsh-a2a.server')
     // Best-effort: after a restart, re-attach persisted a2a- conversations to
-    // the "A2A" workspace (the registry may mount after this row activates).
-    void reattachPersisted(ctx, executor)
+    // the grouping workspace (the registry may mount after this row activates).
+    for (const { executor } of executors) void reattachPersisted(ctx, executor)
   }
   const registry = new A2aRegistry(resolved.agents)
-  const tools = a2aTools(registry)
+  const tools = a2aTools(registry, { callTimeoutMs: resolved.server.callTimeoutMs })
   ctx.effect(() => ctx.tools.register(tools.list), 'dsh-a2a.a2a_list')
   ctx.effect(() => ctx.tools.register(tools.call), 'dsh-a2a.a2a_call')
   // The GUI surface: settings commits (A2A settings tab) hot-reload the tools

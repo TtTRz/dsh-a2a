@@ -30,6 +30,8 @@ import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import { SessionId } from '@deepseek-ai/dsh-session'
 
 export interface ExecutorOptions {
+  /** URL slug of this agent (namespaces the session id, e.g. 'mp-perf'). */
+  agentId: string
   /** Preset mounted into each conversation agent. */
   preset: string
   /** Per-turn deadline; a slow turn is cancelled instead of left running. */
@@ -63,10 +65,10 @@ interface RunningTurn {
   contextId: string
 }
 
-/** Derive a stable dsh session id from an A2A context id. */
-export function sessionIdFor(contextId: string): SessionId {
+/** Derive a stable dsh session id from an A2A context id, namespaced by agent. */
+export function sessionIdFor(agentId: string, contextId: string): SessionId {
   const digest = createHash('sha256').update(contextId).digest('hex').slice(0, 24)
-  return SessionId(`a2a-${digest}`)
+  return SessionId(`a2a-${agentId}-${digest}`)
 }
 
 /** Build an A2A text part. */
@@ -203,7 +205,7 @@ export class DshAgentExecutor implements AgentExecutor {
       }),
     )
     try {
-      const turn = await this.openTurn(sessionIdFor(contextId), contextId)
+      const turn = await this.openTurn(sessionIdFor(this.options.agentId, contextId), contextId)
       this.running.set(taskId, turn)
       turn.agent.followup(
         createUserMessage({

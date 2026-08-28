@@ -63,10 +63,13 @@ export function textOfResult(result: SendMessageResult): string {
 /**
  * Normalize a registry URL to the agent BASE the SDK expects: the SDK
  * appends `/.well-known/agent-card.json` itself, so an entry that already
- * names the full agent-card path would otherwise double the segment.
+ * names the full agent-card path would otherwise double the segment. Keep a
+ * trailing slash on a bare base so the SDK resolves its relative card path
+ * under the agent's `/agents/<id>/` (a base without it would resolve to the
+ * parent — losing the `<id>` segment).
  */
 export function baseUrlOf(url: string): string {
-  const trimmed = url.trim().replace(/\/+$/, '')
+  const trimmed = url.trim()
   const cardPath = '/.well-known/agent-card.json'
   if (trimmed.endsWith(cardPath)) return trimmed.slice(0, -cardPath.length)
   const wellKnown = trimmed.indexOf('/.well-known/')
