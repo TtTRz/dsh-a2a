@@ -179,16 +179,17 @@ export class A2aServer {
     )
   }
 
-  /** Hot-apply a settings-sourced Agent Card override to the first agent. */
-  updateCard(patch: { name?: string; description?: string }): void {
-    const first = [...this.routes.values()][0]
-    if (first === undefined) return
-    first.card = {
-      ...first.card,
-      name: patch.name ?? first.card.name,
-      description: patch.description ?? first.card.description,
+  /** Hot-apply a settings-sourced Agent Card override to one agent (by id). */
+  updateCard(agentId: string | undefined, patch: { name?: string; description?: string }): void {
+    const route = agentId === undefined ? [...this.routes.values()][0] : this.routes.get(agentId)
+    if (route === undefined) return
+    route.card = {
+      ...route.card,
+      name: patch.name ?? route.card.name,
+      description: patch.description ?? route.card.description,
     }
-    if (this.cards.length > 0) this.cards[0] = first.card
+    const index = [...this.routes.values()].indexOf(route)
+    if (index >= 0) this.cards[index] = route.card
   }
 
   /** Bind the configured port; resolves once listening. */

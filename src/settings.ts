@@ -18,17 +18,24 @@ import { type AgentEntry, normalizeAgents, type ResolvedAgentEntry } from './con
 /** The settings namespace the A2A settings tab claims. */
 export const SETTINGS_NAMESPACE = 'a2a'
 
+/** One local agent's editable identity (name/description) as stored. */
+export interface ServerAgentIdentity {
+  id: string
+  name: string
+  description: string
+}
+
 /** The section the settings schema resolves; see {@link A2aSettings}. */
 export interface A2aSettingsValue {
   agents: AgentEntry[]
-  agentCard: { name: string; description: string }
+  serverAgents: ServerAgentIdentity[]
 }
 
 /** What the plugin actually applies from a resolved section. */
 export interface A2aSettingsApplied {
   agents: ResolvedAgentEntry[]
-  /** Full Agent Card identity: blank fields fall back to the composition base. */
-  agentCard: { name: string; description: string }
+  /** Per-local-agent card identity overrides (blank name falls back to base). */
+  serverAgents: ServerAgentIdentity[]
 }
 
 /** One registry row as stored in the settings document. */
@@ -46,12 +53,15 @@ export const AgentEntrySettings = z.object({
  */
 export const A2aSettings = z.object({
   agents: z.array(AgentEntrySettings).default([]),
-  agentCard: z
-    .object({
-      name: z.string().default(''),
-      description: z.string().default(''),
-    })
-    .default({ name: '', description: '' }),
+  serverAgents: z
+    .array(
+      z.object({
+        id: z.string(),
+        name: z.string().default(''),
+        description: z.string().default(''),
+      }),
+    )
+    .default([]),
 })
 
 /**
@@ -77,7 +87,7 @@ interface SettingsService {
  */
 export function attachSettings(
   ctx: Context,
-  base: { agents: AgentEntry[]; agentCard: { name: string; description: string } },
+  base: { agents: AgentEntry[]; serverAgents: ServerAgentIdentity[] },
   onChange: (value: A2aSettingsApplied) => void,
 ): void {
   ctx.inject(['settings'], (scoped) => {
@@ -85,7 +95,7 @@ export function attachSettings(
     const scope = settings.register(SETTINGS_NAMESPACE, A2aSettings, {
       base: {
         agents: base.agents,
-        agentCard: { name: base.agentCard.name, description: base.agentCard.description },
+        serverAgents: base.serverAgents,
       },
       applies: 'live',
     })
@@ -97,10 +107,16 @@ export function attachSettings(
       }
       onChange({
         agents,
-        agentCard: {
-          name: value.agentCard.name.trim() || base.agentCard.name,
-          description: value.agentCard.description.trim() || base.agentCard.description,
-        },
+        serverAgents:
+          value.serverAgents.length > 0
+            ? value.serverAgents.map((entry) => ({
+                id: entry.id,
+                name: entry.name.trim() || (base.serverAgents.find((b) => b.id === entry.id)?.name ?? ''),
+                description:
+                  entry.description.trim() ||
+                  (base.serverAgents.find((b) => b.id === entry.id)?.description ?? ''),
+              }))
+            : base.serverAgents,
       })
     }
     ctx.effect(() => scope.watch(apply), 'dsh-a2a.settings.watch')

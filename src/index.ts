@@ -108,15 +108,22 @@ export function apply(ctx: Context, config: PluginConfig): void {
     ctx,
     {
       agents: resolved.agents,
-      agentCard: {
-        name: resolved.server.agentCard.name,
-        description: resolved.server.agentCard.description,
-      },
+      serverAgents: resolved.server.agents.map((a) => ({
+        id: a.id,
+        name: a.name,
+        description: a.description,
+      })),
     },
     (value) => {
       registry.update(value.agents)
-      serverRef.agentCard = value.agentCard
-      server?.updateCard(value.agentCard)
+      const first = value.serverAgents[0]
+      serverRef.agentCard = {
+        name: first?.name ?? '',
+        description: first?.description ?? '',
+      }
+      for (const entry of value.serverAgents) {
+        server?.updateCard(entry.id, { name: entry.name, description: entry.description })
+      }
     },
   )
 }
