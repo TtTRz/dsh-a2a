@@ -17,6 +17,7 @@
 - 🔌 **完整 A2A v1.0 线格式**——`/.well-known/agent-card.json`、JSON-RPC `SendMessage` / `SendStreamingMessage` / `GetTask` / `CancelTask` / `ListTasks`（流式走 SSE）、REST `message:send` / `tasks/*`——全部经官方 SDK 的 request handler
 - 🔒 **客户端 header 鉴权**——每个 agent 的 headers 支持 `${ENV_VAR}` 占位符调用时解析，凭证不进配置
 - 🔑 **服务端 Bearer 鉴权**——设了 `server.apiKey` 后，除 Agent Card 外的所有请求须带 `Authorization: Bearer <key>`；Agent Card 还可宣告反代后的 `publicUrl`
+- 🎛️ **请求级 preset 与模型**——调用方可通过 A2A `metadata` 指定 preset 与模型路由，而不必沿用部署方的路由（见[请求级覆盖](#-请求级覆盖)）
 - 🧭 **独立模型路由与工作区**——A2A 会话可指定 provider/model 对，并归入专属 workspace（默认 `A2A` 分组、`~/.a2a-sessions` 目录）
 - ⏱️ **单轮超时**——慢轮次主动 cancel（`turnTimeoutMs`，默认 5 分钟），下一条消息不会被卡住
 - 🛡️ **配置失败即报错**——非法 URL、空名字、越界端口在插件加载时抛出
@@ -56,6 +57,7 @@ curl -s http://127.0.0.1:8899/ -H 'Content-Type: application/json' \
       port: 8899               # A2A_PORT
       preset: standard         # 挂进每个会话 agent 的 preset
       turnTimeoutMs: 300000    # 单轮超时
+      allowOverrides: true     # 允许调用方按请求指定 preset/model
       agentCard:
         name: dsh-a2a
         description: A DeepSeek Harness agent exposed over the A2A protocol.
@@ -74,6 +76,7 @@ curl -s http://127.0.0.1:8899/ -H 'Content-Type: application/json' \
 | `server.host` / `server.port` | `127.0.0.1` / `8899` | 监听地址（env `A2A_HOST` / `A2A_PORT`） |
 | `server.preset` | `standard` | 挂进每个 A2A 会话 agent 的 preset |
 | `server.turnTimeoutMs` | `300000` | 单轮超时，超时取消本轮 |
+| `server.allowOverrides` | `true` | 是否允许调用方通过 `metadata` 按请求指定 preset/model；设为 `false` 时覆盖值被丢弃（并记录日志） |
 | `server.publicUrl` | — | Agent Card 上对外宣告的公开 URL（反代后必设）；env `A2A_PUBLIC_URL` |
 | `server.apiKey` | — | 设置后除 Agent Card 外的请求须带 `Authorization: Bearer <key>`；env `A2A_API_KEY` |
 | `server.provider` / `server.model` | — | A2A 会话模型路由，必须成对设置；缺省用 harness 默认模型；env `A2A_PROVIDER` / `A2A_MODEL` |
@@ -83,6 +86,37 @@ curl -s http://127.0.0.1:8899/ -H 'Content-Type: application/json' \
 | `agents[].name` / `url` | — | `a2a_call` 用的注册名 + Agent Card URL |
 | `agents[].headers` | `{}` | 请求头；`${ENV_VAR}` 占位符调用时解析 |
 | `agents[].description` | `''` | `a2a_list` 展示 |
+
+## 🎛️ 请求级覆盖
+
+默认情况下所有会话都走部署方的路由：配置的 `server.preset` 与 provider/model 对。调用方可以在 A2A `metadata` 里点名自己要的 preset 和模型：
+
+```sh
+curl -s http://127.0.0.1:8899/ -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"SendMessage","params":{
+        "message":{"role":"user","messageId":"m1","parts":[{"kind":"text","text":"hi"}],"contextId":"demo"},
+        "metadata":{"agentPreset":"code","model":"deepseek-v4-pro"}
+      }}'
+```
+
+| 键 | 别名 | 含义 | 生效时机 |
+| --- | --- | --- | --- |
+| `agentPreset` | `preset` | 组装 agent 的 preset id，覆盖 `server.preset` | **创建**会话的那条请求 |
+| `model` | — | 模型 id，覆盖 `server.model` | 每条请求都生效，并在会话内**保持** |
+| `provider` | — | provider 路由，与配置的（或默认的）模型配对 | 每条请求都生效 |
+
+两者的生命周期不同，因为 harness 给它们的就是不同的：
+
+- **preset 是组装 agent 用的**——它在会话创建时挂载工具与技能。会话一旦存在，组装就固定了，因此后续轮次的 `preset` 会被忽略并记日志：中途换工具会留下新组合解释不了的 tool 调用记录。请在第一条消息带上 preset（或换一个 `contextId`）。
+- **模型是逐步路由的**，所以活着的会话可以切到请求的模型，且对话不丢——连历史已经攒下的 KV-cache 前缀也一起保住。
+
+优先级与边界：
+
+- `params.message.metadata` 覆盖 `params.metadata`；两处写同值（REST `message:send` 的形状容易诱导这么写）结果无歧义，只写其中一处的调用方同样有效。
+- 只给 `model` 时，会与 `server.provider` 配对，再回落到 harness 默认模型的 provider：调用方知道自己要哪个模型，不见得知道是哪个 provider 在提供。若到处都找不到可配对的 provider，任务直接失败，而不是用一个调用方没要的模型来回答。
+- 值不合法（非字符串，或可能逃出 preset 根目录）时任务失败，并指明是哪个键。
+- preset 不存在时任务失败，并列出本部署实际提供的 id。
+- 设 `server.allowOverrides: false` 可锁死部署方路由：覆盖值被丢弃并记日志，请求照常回答。
 
 ## 🏷️ 部署定制（推荐用法）
 
@@ -138,15 +172,16 @@ patch 层改动在装配期读取，改完需重启 `dsh web` 才生效；GUI �
 
 - 入站鉴权：0.3.0 起可设 `server.apiKey` 开启 Bearer token 校验（Agent Card 除外——它必须公开可读）；大规模部署仍建议再套鉴权网关或反代，Agent Card 不声明 security scheme
 - 单个 executor 实例服务所有 context；跨轮次延续会话，但 dsh 重启后内存态重建（`sessionPersistence` 持久化是规划中的后续）
+- `model` 覆盖只能切换本 executor 实例创建的会话；从外部 adopt 来的会话（在 web UI 打开过、或从磁盘恢复的）没有可切换的路由句柄，覆盖值记日志后忽略，回复沿用创建时的模型。会话由本 executor 创建之后再发 model 则正常切换
 - **0.2.0 起注册表支持 GUI 配置**：设置 → 插件 → 插件配置里的「A2A 远程 agent」卡片可直接增删改注册表，保存即热更新 `a2a_call` / `a2a_list`，无需重启；重置则恢复部署默认（cordis 行配置）。配置落在 settings 文档的 `a2a` 命名空间，解析层级为 schema 默认值 → 行配置 base → 用户覆盖
 
 ## 🧪 开发
 
 ```sh
-npm run check   # biome + typecheck + vitest（12 个测试）+ 构建
+npm run check   # biome + typecheck + vitest（49 个测试）+ 构建
 ```
 
-测试覆盖配置校验、官方 A2A client 走真实 HTTP 端口的 Agent Card + JSON-RPC 往返、按 context 会话延续、任务取消、header 鉴权与模型工具。
+测试覆盖配置校验、官方 A2A client 走真实 HTTP 端口的 Agent Card + JSON-RPC 往返、按 context 会话延续、任务取消、header 鉴权、请求级覆盖与模型工具。
 
 ## 📄 License
 

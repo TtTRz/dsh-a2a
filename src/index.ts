@@ -38,7 +38,14 @@ export type {
   ServerOptions,
 } from './config.js'
 export { Config, normalizeAgents, resolveConfig } from './config.js'
-export { collectReplyText, DshAgentExecutor, sessionIdFor, textOf } from './executor.js'
+export type { RequestOverrides } from './executor.js'
+export {
+  collectReplyText,
+  DshAgentExecutor,
+  requestOverrides,
+  sessionIdFor,
+  textOf,
+} from './executor.js'
 export { A2aServer, type A2aServerOptions, buildAgentCard, type RequestObserver } from './server.js'
 export { A2aSettings, attachSettings, SETTINGS_NAMESPACE } from './settings.js'
 export { A2aRegistry, type A2aToolOptions, a2aTools } from './tools.js'
@@ -73,6 +80,7 @@ export function apply(ctx: Context, config: PluginConfig): void {
       workspaceTitle: resolved.server.workspaceTitle,
       provider: resolved.server.provider,
       model: resolved.server.model,
+      allowOverrides: resolved.server.allowOverrides,
     })
     server = new A2aServer({
       config: resolved.server,
