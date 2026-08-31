@@ -269,6 +269,25 @@ export class DshAgentExecutor implements AgentExecutor {
   }
 
   /**
+   * Cancel and release every running turn, then drop the tracking table. Used
+   * when a served agent is removed or rebuilt live so in-flight turns never
+   * outlive the route that owned them. Idle sessions are left to the harness
+   * (they stay adoptable); this only stops the currently-running turns.
+   */
+  async dispose(): Promise<void> {
+    const turns = [...this.running.values()]
+    this.running.clear()
+    for (const turn of turns) {
+      try {
+        turn.agent.cancel({ kind: 'user' })
+        await turn.dispose()
+      } catch {
+        // best-effort: a session that already closed must never block removal
+      }
+    }
+  }
+
+  /**
    * Publish each rendered card as one file artifact (raw PNG part). A card
    * whose bytes cannot be read is logged and skipped; the text reply still
    * completes the task.
@@ -396,10 +415,7 @@ export class DshAgentExecutor implements AgentExecutor {
    * not-yet-mounted registry) are forgotten so the next call retries instead of
    * caching the miss forever.
    */
-  private ensureWorkspace(
-    sessionId: string,
-    contextId?: string,
-  ): Promise<Workspace | undefined> {
+  private ensureWorkspace(sessionId: string, contextId?: string): Promise<Workspace | undefined> {
     this.workspacePromise ??= new Map()
     const cached = this.workspacePromise.get(sessionId)
     if (cached !== undefined) return cached
@@ -435,7 +451,12 @@ export class DshAgentExecutor implements AgentExecutor {
     const stripped = dirName.replace(/^A2A-/, '').replace(/-[^-]*$/, '')
     const m = /^(.+)-(\d{4})-(\d{2})(\d{2})(\d{2})$/.exec(stripped)
     const suffix =
-      m !== null && m[1] !== undefined && m[2] !== undefined && m[3] !== undefined && m[4] !== undefined && m[5] !== undefined
+      m !== null &&
+      m[1] !== undefined &&
+      m[2] !== undefined &&
+      m[3] !== undefined &&
+      m[4] !== undefined &&
+      m[5] !== undefined
         ? `${m[1]} ${m[2].slice(0, 2)}-${m[2].slice(2)} ${m[3]}:${m[4]}:${m[5]}`
         : sessionId
     const title = `${this.options.workspaceTitle ?? 'A2A'} · ${suffix}`
@@ -464,7 +485,11 @@ export class DshAgentExecutor implements AgentExecutor {
     } catch {
       // base not readable yet — fall through to mint a new name
     }
-    const slug = contextId.replace(/[^A-Za-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 24) || 'caller'
+    const slug =
+      contextId
+        .replace(/[^A-Za-z0-9_-]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 24) || 'caller'
     const d = new Date()
     const pad = (n: number) => String(n).padStart(2, '0')
     const stamp = `${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`

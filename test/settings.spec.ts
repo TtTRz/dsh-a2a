@@ -4,7 +4,7 @@ import { attachSettings } from '../src/settings.js'
 
 interface SettingsValue {
   agents: unknown[]
-  serverAgents?: Array<{ id?: string; name?: string; description?: string }>
+  serverAgents?: unknown[]
 }
 
 interface FakeScope {
@@ -68,7 +68,18 @@ function fakeCtx(settings: FakeSettings): { ctx: Context; warnings: string[] } {
   return { ctx: ctx as unknown as Context, warnings }
 }
 
-const IDENTITY = [{ id: 'agent', name: '部署默认身份', description: 'base description' }]
+const BASE = {
+  id: 'agent',
+  name: '部署默认身份',
+  description: 'base description',
+  version: '0.1.0',
+  preset: 'standard',
+  cwd: '/tmp/a2a-sessions',
+  workspaceTitle: 'A2A',
+}
+const IDENTITY = [BASE]
+
+const DEFAULTS = { cwd: '/tmp/a2a-sessions', workspaceTitle: 'A2A', preset: 'standard' }
 
 describe('attachSettings', () => {
   it('registers the namespace with the row config as composition base and feeds the initial value', () => {
@@ -76,7 +87,7 @@ describe('attachSettings', () => {
     const { ctx } = fakeCtx(settings)
     const onChange = vi.fn()
     const base = [{ name: 'base', url: 'https://base.example.com/' }]
-    attachSettings(ctx, { agents: base, serverAgents: IDENTITY }, onChange)
+    attachSettings(ctx, { agents: base, serverAgents: IDENTITY }, DEFAULTS, onChange)
     expect(settings.lastOptions).toMatchObject({
       applies: 'live',
       base: { agents: base, serverAgents: IDENTITY },
@@ -91,7 +102,7 @@ describe('attachSettings', () => {
     const settings = fakeSettings()
     const { ctx } = fakeCtx(settings)
     const onChange = vi.fn()
-    attachSettings(ctx, { agents: [], serverAgents: IDENTITY }, onChange)
+    attachSettings(ctx, { agents: [], serverAgents: IDENTITY }, DEFAULTS, onChange)
     onChange.mockClear()
     settings.fire({ agents: [{ name: 'b', url: 'http://b.example.com/' }] })
     expect(onChange).toHaveBeenCalledWith({
@@ -106,10 +117,35 @@ describe('attachSettings', () => {
     })
     const { ctx } = fakeCtx(settings)
     const onChange = vi.fn()
-    attachSettings(ctx, { agents: [], serverAgents: IDENTITY }, onChange)
+    attachSettings(ctx, { agents: [], serverAgents: IDENTITY }, DEFAULTS, onChange)
     expect(onChange).toHaveBeenCalledWith({
       agents: [],
-      serverAgents: [{ id: 'agent', name: '用户身份', description: 'base description' }],
+      serverAgents: [{ ...BASE, name: '用户身份', description: 'base description' }],
+    })
+  })
+
+  it('normalizes a new served agent with server-level defaults for blank preset/cwd', () => {
+    const settings = fakeSettings({
+      serverAgents: [{ id: 'new-agent', name: '新 agent', preset: '', cwd: '', description: '' }],
+    })
+    const { ctx } = fakeCtx(settings)
+    const onChange = vi.fn()
+    attachSettings(ctx, { agents: [], serverAgents: IDENTITY }, DEFAULTS, onChange)
+    expect(onChange).toHaveBeenCalledWith({
+      agents: [],
+      serverAgents: [
+        {
+          id: 'new-agent',
+          name: '新 agent',
+          description: 'A DeepSeek Harness agent exposed over the A2A protocol.',
+          version: '0.1.0',
+          preset: 'standard',
+          cwd: '/tmp/a2a-sessions',
+          workspaceTitle: 'A2A',
+          provider: undefined,
+          model: undefined,
+        },
+      ],
     })
   })
 
@@ -119,10 +155,11 @@ describe('attachSettings', () => {
         { name: '', url: 'x' },
         { name: 'ok', url: 'https://ok.example.com/' },
       ],
+      serverAgents: [{ id: 'bad id!', name: 'x', preset: 'p' }],
     })
     const { ctx, warnings } = fakeCtx(settings)
     const onChange = vi.fn()
-    attachSettings(ctx, { agents: [], serverAgents: IDENTITY }, onChange)
+    attachSettings(ctx, { agents: [], serverAgents: IDENTITY }, DEFAULTS, onChange)
     expect(onChange).toHaveBeenCalledWith({
       agents: [{ name: 'ok', url: 'https://ok.example.com/', headers: {}, description: '' }],
       serverAgents: IDENTITY,

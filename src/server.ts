@@ -130,6 +130,10 @@ interface AgentRoute {
   handler: DefaultRequestHandler
   /** URL-safe base path, e.g. `/agents/mp-perf`. */
   basePath: string
+  /** The spec that produced this route (for live reconcile comparison). */
+  spec: ResolvedAgentSpec
+  /** The executor serving this route (for live disposal on removal/rebuild). */
+  executor: AgentExecutor
 }
 
 /**
@@ -152,8 +156,77 @@ export class A2aServer {
       // card must point at ITS OWN `/agents/<id>/` (there is no `/` agent).
       const card = buildAgentCard(options.config, this.url, agent, this.urlFor(basePath))
       const handler = new DefaultRequestHandler(card, new InMemoryTaskStore(), executor)
-      this.routes.set(agent.id, { id: agent.id, card, handler, basePath })
+      this.routes.set(agent.id, { id: agent.id, card, handler, basePath, spec: agent, executor })
       this.cards.push(card)
+    }
+  }
+
+  /**
+   * Serve one extra agent live (add route + card + executor). Rejects when the
+   * id is already served so a collision never silently replaces an agent.
+   */
+  addAgent(agent: ResolvedAgentSpec, executor: AgentExecutor): void {
+    if (this.routes.has(agent.id)) {
+      throw new Error(`dsh-a2a: agent "${agent.id}" is already served`)
+    }
+    const basePath = `/agents/${agent.id}`
+    const card = buildAgentCard(this.options.config, this.url, agent, this.urlFor(basePath))
+    const handler = new DefaultRequestHandler(card, new InMemoryTaskStore(), executor)
+    this.routes.set(agent.id, { id: agent.id, card, handler, basePath, spec: agent, executor })
+    this.cards.push(card)
+  }
+
+  /** Stop serving one agent live: drop its route + card and dispose the executor. */
+  async removeAgent(agentId: string): Promise<void> {
+    const route = this.routes.get(agentId)
+    if (route === undefined) return
+    this.routes.delete(agentId)
+    const index = this.cards.indexOf(route.card)
+    if (index >= 0) this.cards.splice(index, 1)
+    await (route.executor as { dispose?: () => Promise<void> } | undefined)?.dispose?.()
+  }
+
+  /**
+   * Reconcile the served-agent set against a new spec list (the settings
+   * commit): add agents that are new, dispose agents that were removed, and
+   * either hot-apply the card identity or rebuild the route (executor-level
+   * change) for agents whose spec changed. `buildExecutor` must return a fresh
+   * executor for a spec (an executor for a removed agent is disposed).
+   */
+  reconcileAgents(
+    specs: readonly ResolvedAgentSpec[],
+    buildExecutor: (spec: ResolvedAgentSpec) => AgentExecutor,
+  ): void {
+    const wanted = new Set(specs.map((spec) => spec.id))
+    for (const id of [...this.routes.keys()]) {
+      if (!wanted.has(id)) void this.removeAgent(id)
+    }
+    for (const spec of specs) {
+      const route = this.routes.get(spec.id)
+      if (route === undefined) {
+        this.addAgent(spec, buildExecutor(spec))
+        continue
+      }
+      if (sameExecutorSpec(route.spec, spec)) {
+        // Identity-only change: mutate the card in place so the handler's task
+        // store (in-flight tasks) survives.
+        this.updateCard(spec.id, {
+          name: spec.name,
+          description: spec.description,
+          version: spec.version,
+        })
+        route.spec = { ...spec }
+      } else {
+        // Executor-level change (preset / cwd / model route / workspace):
+        // rebuild the route and dispose the old executor so its in-flight
+        // turns are cancelled.
+        const oldCard = route.card
+        this.routes.delete(spec.id)
+        const index = this.cards.indexOf(oldCard)
+        if (index >= 0) this.cards.splice(index, 1)
+        void (route.executor as { dispose?: () => Promise<void> } | undefined)?.dispose?.()
+        this.addAgent(spec, buildExecutor(spec))
+      }
     }
   }
 
@@ -180,13 +253,23 @@ export class A2aServer {
   }
 
   /** Hot-apply a settings-sourced Agent Card override to one agent (by id). */
-  updateCard(agentId: string | undefined, patch: { name?: string; description?: string }): void {
+  updateCard(
+    agentId: string | undefined,
+    patch: { name?: string; description?: string; version?: string },
+  ): void {
     const route = agentId === undefined ? [...this.routes.values()][0] : this.routes.get(agentId)
     if (route === undefined) return
     route.card = {
       ...route.card,
       name: patch.name ?? route.card.name,
       description: patch.description ?? route.card.description,
+      version: patch.version ?? route.card.version,
+    }
+    route.spec = {
+      ...route.spec,
+      name: patch.name ?? route.spec.name,
+      description: patch.description ?? route.spec.description,
+      version: patch.version ?? route.spec.version,
     }
     const index = [...this.routes.values()].indexOf(route)
     if (index >= 0) this.cards[index] = route.card
@@ -272,11 +355,7 @@ export class A2aServer {
     }
     if (req.method === 'POST' && sub === 'message:send') {
       const body = await readBody(req)
-      sendJson(
-        res,
-        200,
-        await route.handler.sendMessage(restBody(body), new ServerCallContext()),
-      )
+      sendJson(res, 200, await route.handler.sendMessage(restBody(body), new ServerCallContext()))
       return
     }
     if (req.method === 'GET' && sub === 'tasks') {
@@ -284,7 +363,13 @@ export class A2aServer {
         res,
         200,
         await route.handler.listTasks(
-          { tenant: '', contextId: '', status: TaskStateEnum.TASK_STATE_UNSPECIFIED, pageToken: '', statusTimestampAfter: '' },
+          {
+            tenant: '',
+            contextId: '',
+            status: TaskStateEnum.TASK_STATE_UNSPECIFIED,
+            pageToken: '',
+            statusTimestampAfter: '',
+          },
           new ServerCallContext(),
         ),
       )
@@ -294,11 +379,22 @@ export class A2aServer {
     if (taskMatch !== null && taskMatch[1] !== undefined) {
       const taskId = decodeURIComponent(taskMatch[1])
       if (req.method === 'GET' && !sub.endsWith(':cancel')) {
-        sendJson(res, 200, await route.handler.getTask({ id: taskId, tenant: '' }, new ServerCallContext()))
+        sendJson(
+          res,
+          200,
+          await route.handler.getTask({ id: taskId, tenant: '' }, new ServerCallContext()),
+        )
         return
       }
       if (req.method === 'POST' && sub.endsWith(':cancel')) {
-        sendJson(res, 200, await route.handler.cancelTask({ id: taskId, tenant: '', metadata: undefined }, new ServerCallContext()))
+        sendJson(
+          res,
+          200,
+          await route.handler.cancelTask(
+            { id: taskId, tenant: '', metadata: undefined },
+            new ServerCallContext(),
+          ),
+        )
         return
       }
     }
@@ -332,7 +428,9 @@ export class A2aServer {
           res.write(`data: ${JSON.stringify(next.value)}\n\n`)
         }
       } catch (error) {
-        res.write(`event: error\ndata: ${JSON.stringify({ code: -32603, message: String(error) })}\n\n`)
+        res.write(
+          `event: error\ndata: ${JSON.stringify({ code: -32603, message: String(error) })}\n\n`,
+        )
       }
       res.end()
       return
@@ -344,6 +442,17 @@ export class A2aServer {
 function isAsyncGenerator(value: unknown): value is AsyncGenerator<unknown, void, undefined> {
   return (
     typeof (value as { [Symbol.asyncIterator]?: unknown })?.[Symbol.asyncIterator] === 'function'
+  )
+}
+
+/** Whether two specs share the executor-affecting fields (identity aside). */
+function sameExecutorSpec(left: ResolvedAgentSpec, right: ResolvedAgentSpec): boolean {
+  return (
+    left.preset === right.preset &&
+    left.cwd === right.cwd &&
+    left.workspaceTitle === right.workspaceTitle &&
+    (left.provider ?? undefined) === (right.provider ?? undefined) &&
+    (left.model ?? undefined) === (right.model ?? undefined)
   )
 }
 

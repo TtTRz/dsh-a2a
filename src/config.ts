@@ -181,6 +181,89 @@ export interface ResolvedAgentEntry {
   description: string
 }
 
+/** Defaults filled into settings-fed served agents for blank fields. */
+export interface ServerAgentDefaults {
+  cwd: string
+  workspaceTitle: string
+  /** Fallback preset for a brand-new served agent (the server-level preset). */
+  preset: string
+  provider?: string
+  model?: string
+}
+
+/** Normalize one settings-fed served agent against a base map (by id) + defaults. */
+export function normalizeServerAgent(
+  raw: unknown,
+  base: ReadonlyMap<string, ResolvedAgentSpec>,
+  defaults: ServerAgentDefaults,
+  label: string,
+): ResolvedAgentSpec {
+  const row = (raw ?? {}) as Partial<AgentSpec>
+  const id = (row.id ?? '').trim()
+  if (id.length === 0 || !/^[a-z0-9][a-z0-9_-]*$/.test(id)) {
+    throw new Error(
+      `dsh-a2a: ${label}.id must be a URL-safe slug (e.g. mp-perf), got ${JSON.stringify(row.id)}`,
+    )
+  }
+  const known = base.get(id)
+  const name = (row.name ?? '').trim() || known?.name || ''
+  if (name.length === 0) throw new Error(`dsh-a2a: ${label}.name must not be empty`)
+  const preset = (row.preset ?? '').trim() || known?.preset || defaults.preset
+  if (preset.length === 0) throw new Error(`dsh-a2a: ${label}.preset must not be empty`)
+  const provider = (row.provider ?? '').trim() || known?.provider || defaults.provider
+  const model = (row.model ?? '').trim() || known?.model || defaults.model
+  if ((provider === undefined) !== (model === undefined)) {
+    throw new Error(`dsh-a2a: ${label}.provider and ${label}.model must be set together`)
+  }
+  const cwd = (row.cwd ?? '').trim() || known?.cwd || defaults.cwd
+  if (!isAbsolute(cwd)) {
+    throw new Error(
+      `dsh-a2a: ${label}.cwd must be an absolute path, got ${JSON.stringify(row.cwd)}`,
+    )
+  }
+  return {
+    id,
+    name,
+    description:
+      (row.description ?? '').trim() ||
+      known?.description ||
+      'A DeepSeek Harness agent exposed over the A2A protocol.',
+    version: (row.version ?? '').trim() || known?.version || '0.1.0',
+    preset,
+    provider,
+    model,
+    cwd,
+    workspaceTitle:
+      (row.workspaceTitle ?? '').trim() || known?.workspaceTitle || defaults.workspaceTitle,
+  }
+}
+
+/**
+ * Lenient normalization for settings-fed served agents: rows the strict
+ * load-time checks would reject (blank name/preset, bad id, non-absolute cwd)
+ * are dropped instead of failing the whole document, so one bad hand edit
+ * never breaks the settings tab. Blank fields inherit the matching base agent
+ * (by id) then the server defaults, so a row that only edits identity keeps
+ * the deployment's preset / cwd.
+ */
+export function normalizeServerAgents(
+  entries: readonly unknown[],
+  baseAgents: readonly ResolvedAgentSpec[],
+  defaults: ServerAgentDefaults,
+): { agents: ResolvedAgentSpec[]; rejected: number } {
+  const base = new Map(baseAgents.map((agent) => [agent.id, agent]))
+  const agents: ResolvedAgentSpec[] = []
+  let rejected = 0
+  entries.forEach((raw, index) => {
+    try {
+      agents.push(normalizeServerAgent(raw, base, defaults, `serverAgents[${index}]`))
+    } catch {
+      rejected += 1
+    }
+  })
+  return { agents, rejected }
+}
+
 export interface ResolvedConfig {
   server: ResolvedServer
   agents: ResolvedAgentEntry[]
