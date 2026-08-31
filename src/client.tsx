@@ -1096,7 +1096,7 @@ function ServerInfoPanel(props: { scope: ScopeLike }): ReactNode {
   const [info, setInfo] = useState<ServerInfoValue | null>(null)
   const [loading, setLoading] = useState(true)
   const [failed, setFailed] = useState(false)
-  const [copied, setCopied] = useState(false)
+  const [copiedUrl, setCopiedUrl] = useState<string | null>(null)
   const [identityRows, setIdentityRows] = useState<IdentityRow[]>([])
   const [savingIdentity, setSavingIdentity] = useState(false)
   const [editingIdentity, setEditingIdentity] = useState(false)
@@ -1171,23 +1171,32 @@ function ServerInfoPanel(props: { scope: ScopeLike }): ReactNode {
     </div>
   )
   const serverAgents = snapshot.value?.serverAgents ?? []
-  const cardBase =
-    info !== null && info.enabled
-      ? (info.publicUrl ?? `http://${info.host}:${String(info.port)}/`)
-      : undefined
-  const cardUrl =
-    cardBase === undefined
+  const serverOn = info !== null && info.enabled
+  const baseUrl = serverOn
+    ? (info.publicUrl ?? `http://${info.host}:${String(info.port)}/`)
+    : undefined
+  const withSlash = (url: string): string => (url.endsWith('/') ? url : `${url}/`)
+  /** The single root discovery card (first agent's card). */
+  const rootCardUrl =
+    baseUrl === undefined ? undefined : `${withSlash(baseUrl)}.well-known/agent-card.json`
+  /** One served agent's own card address at `/agents/<id>`. */
+  const agentCardUrl = (id: string | undefined): string | undefined =>
+    baseUrl === undefined || id === undefined || id.length === 0
       ? undefined
-      : cardBase.endsWith('/')
-        ? `${cardBase}.well-known/agent-card.json`
-        : `${cardBase}/.well-known/agent-card.json`
-  const copyCardUrl = (): void => {
-    if (cardUrl === undefined || typeof navigator === 'undefined') return
-    void navigator.clipboard.writeText(cardUrl).then(() => {
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
+      : `${withSlash(baseUrl)}agents/${id}/.well-known/agent-card.json`
+  const copyCardUrl = (url: string): void => {
+    if (url.length === 0 || typeof navigator === 'undefined') return
+    void navigator.clipboard.writeText(url).then(() => {
+      setCopiedUrl(url)
+      setTimeout(() => setCopiedUrl(null), 2000)
     })
   }
+  const tutorialUrl = agentCardUrl(serverAgents[0]?.id) ?? rootCardUrl
+  const overridden =
+    snapshot.user !== undefined &&
+    snapshot.user !== null &&
+    typeof snapshot.user === 'object' &&
+    'serverAgents' in (snapshot.user as Record<string, unknown>)
   const identityDirty =
     identityRows.length !== serverAgents.length ||
     identityRows.some(
@@ -1241,7 +1250,7 @@ function ServerInfoPanel(props: { scope: ScopeLike }): ReactNode {
           {t.inboundTitle}
         </h3>
         <span style={{ flex: '1' }} />
-        <TutorialPopover cardUrl={cardUrl} />
+        <TutorialPopover cardUrl={tutorialUrl} />
         <Button
           variant="ghost"
           size="sm"
@@ -1289,26 +1298,114 @@ function ServerInfoPanel(props: { scope: ScopeLike }): ReactNode {
             {row(t.inboundPreset, info.preset)}
             {row(t.inboundWorkspace, info.workspaceTitle)}
           </div>
-          {cardUrl !== undefined ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
-              <span style={{ ...labelStyle2, flex: 'none' }}>{t.cardUrl}</span>
-              <code
-                style={{
-                  minWidth: 0,
-                  flex: '1',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                  fontSize: '12px',
-                  color: cssVars.labelSecondary,
-                }}
-                title={cardUrl}
-              >
-                {cardUrl}
-              </code>
-              <Button variant="ghost" size="sm" onClick={copyCardUrl}>
-                {copied ? t.cardUrlCopied : t.cardUrlCopy}
-              </Button>
+          {serverAgents.length > 0 ? (
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '4px',
+                borderTop: `1px solid ${cssVars.borderL2}`,
+                paddingTop: '12px',
+              }}
+            >
+              <span style={{ fontSize: '12px', fontWeight: 600, color: cssVars.labelPrimary }}>
+                {t.cardUrl}
+              </span>
+              {serverAgents.map((agent) => {
+                const agentUrl = agentCardUrl(agent.id)
+                const presetText = agent.preset?.length > 0 ? agent.preset : '—'
+                return (
+                  <div
+                    key={agent.id}
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '5px',
+                      padding: '8px 0',
+                      borderTop: `1px dashed ${cssVars.borderL1}`,
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span
+                        style={{
+                          flex: 'none',
+                          fontSize: '11px',
+                          fontWeight: 600,
+                          lineHeight: '18px',
+                          padding: '0 8px',
+                          borderRadius: '999px',
+                          background: cssVars.bgModulePlatform,
+                          color: cssVars.labelSecondary,
+                        }}
+                      >
+                        {presetText}
+                      </span>
+                      <span
+                        style={{
+                          minWidth: 0,
+                          fontSize: '13px',
+                          fontWeight: 600,
+                          color: cssVars.labelPrimary,
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {agent.name?.length > 0 ? agent.name : agent.id}
+                      </span>
+                      <code
+                        style={{ flex: 'none', fontSize: '11px', color: cssVars.labelTertiary }}
+                      >
+                        /agents/{agent.id}
+                      </code>
+                    </div>
+                    {agent.description && agent.description.length > 0 ? (
+                      <p
+                        style={{
+                          margin: 0,
+                          fontSize: '12px',
+                          lineHeight: 1.5,
+                          color: cssVars.labelTertiary,
+                          display: '-webkit-box',
+                          WebkitLineClamp: 2,
+                          WebkitBoxOrient: 'vertical',
+                          overflow: 'hidden',
+                        }}
+                      >
+                        {agent.description}
+                      </p>
+                    ) : null}
+                    {agentUrl !== undefined ? (
+                      <div
+                        style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0 }}
+                      >
+                        <code
+                          title={agentUrl}
+                          style={{
+                            minWidth: 0,
+                            flex: '1',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                            fontSize: '11px',
+                            color: cssVars.labelSecondary,
+                          }}
+                        >
+                          {agentUrl}
+                        </code>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          style={{ flex: 'none' }}
+                          onClick={() => copyCardUrl(agentUrl)}
+                        >
+                          {copiedUrl === agentUrl ? t.cardUrlCopied : t.cardUrlCopy}
+                        </Button>
+                      </div>
+                    ) : null}
+                  </div>
+                )
+              })}
             </div>
           ) : null}
           {writable ? (
@@ -1337,10 +1434,7 @@ function ServerInfoPanel(props: { scope: ScopeLike }): ReactNode {
                       {t.identityTitle}
                     </span>
                     <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-                      {snapshot.user !== undefined &&
-                      snapshot.user !== null &&
-                      typeof snapshot.user === 'object' &&
-                      'serverAgents' in (snapshot.user as Record<string, unknown>) ? (
+                      {overridden ? (
                         <Button variant="ghost" size="sm" onClick={() => void resetIdentity()}>
                           {t.identityReset}
                         </Button>
@@ -1504,34 +1598,6 @@ function ServerInfoPanel(props: { scope: ScopeLike }): ReactNode {
                       {t.identityEdit}
                     </Button>
                   </div>
-                  {serverAgents.map((agent) => (
-                    <div
-                      key={agent.id}
-                      style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}
-                    >
-                      <span style={{ fontSize: '11px', color: cssVars.labelTertiary }}>
-                        /agents/{agent.id}
-                      </span>
-                      <p style={{ margin: 0, fontSize: '13px', color: cssVars.labelPrimary }}>
-                        {agent.name?.length > 0 ? agent.name : agent.id}
-                      </p>
-                      {agent.description && agent.description.length > 0 ? (
-                        <p
-                          style={{
-                            margin: 0,
-                            fontSize: '12px',
-                            lineHeight: 1.5,
-                            color: cssVars.labelTertiary,
-                          }}
-                        >
-                          {agent.description}
-                        </p>
-                      ) : null}
-                      <p style={{ margin: 0, fontSize: '11px', color: cssVars.labelTertiary }}>
-                        {agent.preset?.length > 0 ? agent.preset : '—'}
-                      </p>
-                    </div>
-                  ))}
                 </div>
               )}
             </div>
