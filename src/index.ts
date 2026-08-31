@@ -17,7 +17,7 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
-import { type Config as PluginConfig, resolveConfig } from './config.js'
+import { type Config as PluginConfig, type ResolvedAgentSpec, resolveConfig } from './config.js'
 import { DshAgentExecutor } from './executor.js'
 import { registerA2aRoutes } from './routes.js'
 import { A2aServer } from './server.js'
@@ -34,11 +34,12 @@ export type {
   AgentEntry,
   Config as A2aConfig,
   ResolvedAgentEntry,
+  ResolvedAgentSpec,
   ResolvedConfig,
   ResolvedServer,
   ServerOptions,
 } from './config.js'
-export { Config, normalizeAgents, resolveConfig } from './config.js'
+export { Config, normalizeAgents, normalizeServerAgents, resolveConfig } from './config.js'
 export { collectReplyText, DshAgentExecutor, sessionIdFor, textOf } from './executor.js'
 export { registerA2aRoutes } from './routes.js'
 export { A2aServer, type A2aServerOptions, buildAgentCard, type RequestObserver } from './server.js'
@@ -67,9 +68,8 @@ export function apply(ctx: Context, config: PluginConfig): void {
   }
   registerA2aRoutes(ctx, serverRef)
   let server: A2aServer | undefined
-  const executors = resolved.server.agents.map((agent) => ({
-    agent,
-    executor: new DshAgentExecutor(ctx, {
+  const buildExecutor = (agent: ResolvedAgentSpec): DshAgentExecutor =>
+    new DshAgentExecutor(ctx, {
       agentId: agent.id,
       preset: agent.preset,
       turnTimeoutMs: resolved.server.turnTimeoutMs,
@@ -77,7 +77,10 @@ export function apply(ctx: Context, config: PluginConfig): void {
       workspaceTitle: agent.workspaceTitle,
       provider: agent.provider,
       model: agent.model,
-    }),
+    })
+  const executors = resolved.server.agents.map((agent) => ({
+    agent,
+    executor: buildExecutor(agent),
   }))
   if (resolved.server.enabled) {
     server = new A2aServer({
@@ -103,17 +106,21 @@ export function apply(ctx: Context, config: PluginConfig): void {
   ctx.effect(() => ctx.tools.register(tools.list), 'dsh-a2a.a2a_list')
   ctx.effect(() => ctx.tools.register(tools.call), 'dsh-a2a.a2a_call')
   // The GUI surface: settings commits (A2A settings tab) hot-reload the tools
-  // and the served Agent Card; profiles without a settings service keep the
-  // static cordis-row registry and identity.
+  // and the served Agent Card set (add / remove / re-identity a served agent);
+  // profiles without a settings service keep the static cordis-row registry
+  // and identity.
   attachSettings(
     ctx,
     {
       agents: resolved.agents,
-      serverAgents: resolved.server.agents.map((a) => ({
-        id: a.id,
-        name: a.name,
-        description: a.description,
-      })),
+      serverAgents: resolved.server.agents,
+    },
+    {
+      cwd: resolved.server.cwd,
+      workspaceTitle: resolved.server.workspaceTitle,
+      provider: resolved.server.provider,
+      model: resolved.server.model,
+      preset: resolved.server.preset,
     },
     (value) => {
       registry.update(value.agents)
@@ -122,9 +129,7 @@ export function apply(ctx: Context, config: PluginConfig): void {
         name: first?.name ?? '',
         description: first?.description ?? '',
       }
-      for (const entry of value.serverAgents) {
-        server?.updateCard(entry.id, { name: entry.name, description: entry.description })
-      }
+      server?.reconcileAgents(value.serverAgents, buildExecutor)
     },
   )
 }

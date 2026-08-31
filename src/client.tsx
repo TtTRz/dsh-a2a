@@ -48,6 +48,47 @@ export const name = 'dsh-a2a-client'
 // service mount can park the fiber waiting on itself.
 export const inject = ['slots', 'settingsScope']
 
+/** A served-agent row as the settings document stores it (blank = inherit). */
+interface ServedAgent {
+  id?: string
+  name?: string
+  description?: string
+  version?: string
+  preset?: string
+  cwd?: string
+  workspaceTitle?: string
+  provider?: string
+  model?: string
+}
+
+/** A served-agent row in the identity editor (all strings, may be blank). */
+interface IdentityRow {
+  id: string
+  name: string
+  description: string
+  version: string
+  preset: string
+  cwd: string
+  workspaceTitle: string
+  provider: string
+  model: string
+}
+
+/** Seed an editor row from a stored served agent (blank fields become ''). */
+function rowFromServerAgent(agent: ServedAgent): IdentityRow {
+  return {
+    id: agent.id ?? '',
+    name: agent.name ?? '',
+    description: agent.description ?? '',
+    version: agent.version ?? '',
+    preset: agent.preset ?? '',
+    cwd: agent.cwd ?? '',
+    workspaceTitle: agent.workspaceTitle ?? '',
+    provider: agent.provider ?? '',
+    model: agent.model ?? '',
+  }
+}
+
 /** The slice of the client settings scope contract this tab consumes. */
 interface ScopeLike {
   getSnapshot(): {
@@ -55,7 +96,7 @@ interface ScopeLike {
     value:
       | {
           agents?: StoredAgent[]
-          serverAgents?: Array<{ id?: string; name?: string; description?: string }>
+          serverAgents?: ServedAgent[]
         }
       | undefined
     user: unknown
@@ -155,6 +196,12 @@ const COPY: { zh: Dictionary; en: Dictionary } = {
     identityTitle: 'Agent Card 身份（可编辑，保存即生效）',
     identityName: '名称',
     identityDescription: '描述',
+    identityPreset: 'Preset',
+    identityCwd: '工作目录',
+    identityWorkspace: '工作区分组',
+    identityProvider: 'Provider',
+    identityModel: 'Model',
+    addAgent: '新增 agent',
     identitySave: '保存身份',
     identitySaving: '保存中…',
     identityReset: '重置为部署默认',
@@ -245,6 +292,12 @@ const COPY: { zh: Dictionary; en: Dictionary } = {
     identityTitle: 'Agent Card identity (editable, live on save)',
     identityName: 'Name',
     identityDescription: 'Description',
+    identityPreset: 'Preset',
+    identityCwd: 'Working directory',
+    identityWorkspace: 'Workspace group',
+    identityProvider: 'Provider',
+    identityModel: 'Model',
+    addAgent: 'Add agent',
     identitySave: 'Save identity',
     identitySaving: 'Saving…',
     identityReset: 'Reset to deployment default',
@@ -1044,11 +1097,33 @@ function ServerInfoPanel(props: { scope: ScopeLike }): ReactNode {
   const [loading, setLoading] = useState(true)
   const [failed, setFailed] = useState(false)
   const [copied, setCopied] = useState(false)
-  const [identityRows, setIdentityRows] = useState<
-    Array<{ id: string; name: string; description: string }>
-  >([])
+  const [identityRows, setIdentityRows] = useState<IdentityRow[]>([])
   const [savingIdentity, setSavingIdentity] = useState(false)
   const [editingIdentity, setEditingIdentity] = useState(false)
+  const editIdentityRow = (index: number, patch: Partial<IdentityRow>): void => {
+    setIdentityRows((current) =>
+      current.map((row, i) => (i === index ? { ...row, ...patch } : row)),
+    )
+  }
+  const addIdentityRow = (): void => {
+    setIdentityRows((current) => [
+      ...current,
+      {
+        id: '',
+        name: '',
+        description: '',
+        version: '',
+        preset: '',
+        cwd: '',
+        workspaceTitle: '',
+        provider: '',
+        model: '',
+      },
+    ])
+  }
+  const removeIdentityRow = (index: number): void => {
+    setIdentityRows((current) => current.filter((_, i) => i !== index))
+  }
   const refreshServerInfo = useCallback(async (): Promise<void> => {
     try {
       const value = await fetchServerInfo()
@@ -1113,7 +1188,11 @@ function ServerInfoPanel(props: { scope: ScopeLike }): ReactNode {
       setTimeout(() => setCopied(false), 2000)
     })
   }
-  const identityDirty = JSON.stringify(identityRows) !== JSON.stringify(serverAgents)
+  const identityDirty =
+    identityRows.length !== serverAgents.length ||
+    identityRows.some(
+      (row, i) => JSON.stringify(row) !== JSON.stringify(rowFromServerAgent(serverAgents[i] ?? {})),
+    )
   const saveIdentity = async (): Promise<void> => {
     if (savingIdentity) return
     setSavingIdentity(true)
@@ -1271,60 +1350,104 @@ function ServerInfoPanel(props: { scope: ScopeLike }): ReactNode {
                       </Button>
                     </div>
                   </div>
-                  {serverAgents.map((entry, index) => {
-                    const row = identityRows[index] ?? {
-                      id: entry.id ?? '',
-                      name: '',
-                      description: '',
-                    }
+                  {identityRows.map((row, index) => {
+                    const field = (
+                      label: string,
+                      key: keyof IdentityRow,
+                      value: string,
+                      placeholder?: string,
+                    ): ReactNode => (
+                      <label style={itemStyle}>
+                        <span style={labelStyle2}>{label}</span>
+                        <input
+                          style={inputStyle2}
+                          value={value}
+                          placeholder={placeholder}
+                          onChange={(event) =>
+                            editIdentityRow(index, {
+                              [key]: event.target.value,
+                            } as Partial<IdentityRow>)
+                          }
+                        />
+                      </label>
+                    )
                     return (
                       <div
-                        key={entry.id ?? String(index)}
+                        key={row.id.length > 0 ? row.id : `__new-${index}`}
                         style={{
                           display: 'flex',
                           flexDirection: 'column',
-                          gap: '6px',
-                          padding: '8px 0',
+                          gap: '8px',
+                          padding: '10px 0',
                           borderTop: `1px dashed ${cssVars.borderL1}`,
                         }}
                       >
-                        <span style={{ fontSize: '11px', color: cssVars.labelTertiary }}>
-                          /agents/{entry.id}
-                        </span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span
+                            style={{
+                              fontSize: '12px',
+                              fontWeight: 600,
+                              color: cssVars.labelSecondary,
+                            }}
+                          >
+                            {t.agentLabel} {index + 1}
+                          </span>
+                          <span style={{ flex: '1' }} />
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => removeIdentityRow(index)}
+                            style={{ color: cssVars.labelError, flex: 'none' }}
+                          >
+                            {t.remove}
+                          </Button>
+                        </div>
                         <label style={itemStyle}>
-                          <span style={labelStyle2}>{t.identityName}</span>
+                          <span style={labelStyle2}>ID</span>
                           <input
                             style={inputStyle2}
-                            value={row.name}
-                            placeholder={t.identityName}
-                            onChange={(event) =>
-                              setIdentityRows((current) =>
-                                current.map((r, i) =>
-                                  i === index ? { ...r, name: event.target.value } : r,
-                                ),
-                              )
-                            }
+                            value={row.id}
+                            placeholder="例如 mp-perf"
+                            onChange={(event) => editIdentityRow(index, { id: event.target.value })}
                           />
+                          <span style={{ fontSize: '11px', color: cssVars.labelTertiary }}>
+                            /agents/{row.id.length > 0 ? row.id : '…'}
+                          </span>
                         </label>
-                        <label style={itemStyle}>
-                          <span style={labelStyle2}>{t.identityDescription}</span>
-                          <input
-                            style={inputStyle2}
-                            value={row.description}
-                            placeholder={t.identityDescription}
-                            onChange={(event) =>
-                              setIdentityRows((current) =>
-                                current.map((r, i) =>
-                                  i === index ? { ...r, description: event.target.value } : r,
-                                ),
-                              )
-                            }
-                          />
-                        </label>
+                        {field(t.identityName, 'name', row.name, t.identityName)}
+                        {field(
+                          t.identityDescription,
+                          'description',
+                          row.description,
+                          t.identityDescription,
+                        )}
+                        {field(t.identityPreset, 'preset', row.preset, t.identityPreset)}
+                        {field(t.identityCwd, 'cwd', row.cwd, t.identityCwd)}
+                        {field(
+                          t.identityWorkspace,
+                          'workspaceTitle',
+                          row.workspaceTitle,
+                          t.identityWorkspace,
+                        )}
+                        {field(t.identityProvider, 'provider', row.provider, t.identityProvider)}
+                        {field(t.identityModel, 'model', row.model, t.identityModel)}
                       </div>
                     )
                   })}
-                  <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                  <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
+                    <Button variant="outline" size="sm" onClick={addIdentityRow}>
+                      + {t.addAgent}
+                    </Button>
+                  </div>
+                  <div
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'flex-end',
+                      gap: '6px',
+                      borderTop: `1px solid ${cssVars.borderL2}`,
+                      paddingTop: '10px',
+                    }}
+                  >
                     <Button
                       variant="primary"
                       size="sm"
@@ -1374,13 +1497,7 @@ function ServerInfoPanel(props: { scope: ScopeLike }): ReactNode {
                       variant="ghost"
                       size="sm"
                       onClick={() => {
-                        setIdentityRows(
-                          serverAgents.map((a) => ({
-                            id: a.id ?? '',
-                            name: a.name ?? '',
-                            description: a.description ?? '',
-                          })),
-                        )
+                        setIdentityRows(serverAgents.map((a) => rowFromServerAgent(a)))
                         setEditingIdentity(true)
                       }}
                     >
@@ -1410,6 +1527,9 @@ function ServerInfoPanel(props: { scope: ScopeLike }): ReactNode {
                           {agent.description}
                         </p>
                       ) : null}
+                      <p style={{ margin: 0, fontSize: '11px', color: cssVars.labelTertiary }}>
+                        {agent.preset?.length > 0 ? agent.preset : '—'}
+                      </p>
                     </div>
                   ))}
                 </div>

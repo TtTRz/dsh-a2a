@@ -7,7 +7,7 @@
 import type { Message } from '@a2a-js/sdk'
 import { Role as RoleEnum, TaskState } from '@a2a-js/sdk'
 import { ClientFactory, ClientFactoryOptions } from '@a2a-js/sdk/client'
-import type { ExecutionEventBus } from '@a2a-js/sdk/server'
+import type { AgentExecutor, ExecutionEventBus } from '@a2a-js/sdk/server'
 import type { Context } from '@deepseek-ai/cordis'
 import { describe, expect, it } from 'vitest'
 import { resolveConfig } from '../src/config.js'
@@ -15,7 +15,15 @@ import { DshAgentExecutor, sessionIdFor, textPart } from '../src/executor.js'
 import { A2aServer } from '../src/server.js'
 import { freePort } from './net.js'
 
-const testAgent = { id: 'test', name: 'test-agent', description: 'test', version: '0.1.0', preset: 'standard', cwd: '/tmp', workspaceTitle: 'A2A' }
+const testAgent = {
+  id: 'test',
+  name: 'test-agent',
+  description: 'test',
+  version: '0.1.0',
+  preset: 'standard',
+  cwd: '/tmp',
+  workspaceTitle: 'A2A',
+}
 
 interface SessionEventLike {
   type: string
@@ -131,7 +139,11 @@ describe('A2A server with a harness executor', () => {
     const port = await freePort()
     const agents = new Map<string, FakeAgent>()
     const ctx = fakeCtx(agents)
-    const executor = new DshAgentExecutor(ctx, { agentId: 'test', preset: 'standard', turnTimeoutMs: 10_000 })
+    const executor = new DshAgentExecutor(ctx, {
+      agentId: 'test',
+      preset: 'standard',
+      turnTimeoutMs: 10_000,
+    })
     const server = new A2aServer({
       config: resolveConfig({
         server: { host: '127.0.0.1', port, agentCard: { name: 'test-agent' } },
@@ -147,7 +159,9 @@ describe('A2A server with a harness executor', () => {
       expect(card.name).toBe('test-agent')
 
       // Blocking SendMessage through the official client.
-      const client = await new ClientFactory(ClientFactoryOptions.default).createFromUrl(`${server.url}agents/test/`)
+      const client = await new ClientFactory(ClientFactoryOptions.default).createFromUrl(
+        `${server.url}agents/test/`,
+      )
       const result = await client.sendMessage({
         tenant: '',
         message: userMessage('hello'),
@@ -172,7 +186,9 @@ describe('A2A server with a harness executor', () => {
   it('keeps per-context sessions and continues the same agent', async () => {
     const port = await freePort()
     const agents = new Map<string, FakeAgent>()
-    const executor = new DshAgentExecutor(fakeCtx(agents), { agentId: 'test', preset: 'standard',
+    const executor = new DshAgentExecutor(fakeCtx(agents), {
+      agentId: 'test',
+      preset: 'standard',
       turnTimeoutMs: 10_000,
     })
     const server = new A2aServer({
@@ -181,7 +197,9 @@ describe('A2A server with a harness executor', () => {
     })
     await server.start()
     try {
-      const client = await new ClientFactory(ClientFactoryOptions.default).createFromUrl(`${server.url}agents/test/`)
+      const client = await new ClientFactory(ClientFactoryOptions.default).createFromUrl(
+        `${server.url}agents/test/`,
+      )
       const message = (text: string): Message => ({
         ...userMessage(text),
         messageId: Math.random().toString(),
@@ -212,7 +230,11 @@ describe('A2A server with a harness executor', () => {
     const port = await freePort()
     const agents = new Map<string, FakeAgent>()
     const ctx = fakeCtx(agents)
-    const executor = new DshAgentExecutor(ctx, { agentId: 'test', preset: 'standard', turnTimeoutMs: 10_000 })
+    const executor = new DshAgentExecutor(ctx, {
+      agentId: 'test',
+      preset: 'standard',
+      turnTimeoutMs: 10_000,
+    })
     const { bus, events } = collectingBus()
     const hanging = new FakeAgent()
     hanging.hang = true
@@ -250,7 +272,11 @@ describe('A2A server with a harness executor', () => {
 
   it('enforces the configured API key on everything but the Agent Card', async () => {
     const port = await freePort()
-    const executor = new DshAgentExecutor(fakeCtx(), { agentId: 'test', preset: 'standard', turnTimeoutMs: 10_000 })
+    const executor = new DshAgentExecutor(fakeCtx(), {
+      agentId: 'test',
+      preset: 'standard',
+      turnTimeoutMs: 10_000,
+    })
     const server = new A2aServer({
       config: resolveConfig({ server: { host: '127.0.0.1', port, apiKey: 'secret' } }).server,
       agents: [{ agent: testAgent, executor }],
@@ -298,7 +324,11 @@ describe('A2A server with a harness executor', () => {
 
   it('advertises the configured public URL on the Agent Card', async () => {
     const port = await freePort()
-    const executor = new DshAgentExecutor(fakeCtx(), { agentId: 'test', preset: 'standard', turnTimeoutMs: 10_000 })
+    const executor = new DshAgentExecutor(fakeCtx(), {
+      agentId: 'test',
+      preset: 'standard',
+      turnTimeoutMs: 10_000,
+    })
     const server = new A2aServer({
       config: resolveConfig({
         server: { host: '127.0.0.1', port, publicUrl: 'https://agents.example.com/' },
@@ -335,7 +365,9 @@ describe('A2A server with a harness executor', () => {
       const agent = new FakeAgent()
       return { agent, dispose: async () => undefined }
     }
-    const executor = new DshAgentExecutor(ctx, { agentId: 'test', preset: 'standard',
+    const executor = new DshAgentExecutor(ctx, {
+      agentId: 'test',
+      preset: 'standard',
       turnTimeoutMs: 10_000,
       cwd: '/tmp/a2a-ws-test',
       workspaceTitle: 'A2A',
@@ -368,5 +400,81 @@ describe('A2A server with a harness executor', () => {
     expect(defaults.server.workspaceTitle).toBe('A2A')
     expect(defaults.server.cwd.length).toBeGreaterThan(0)
     expect(() => resolveConfig({ server: { provider: 'venus' } })).toThrow(/together/)
+  })
+})
+
+/** A minimal executor stand-in that records whether it was disposed. */
+class FakeExecutor implements AgentExecutor {
+  disposed = false
+  async execute(): Promise<void> {}
+  async cancelTask(): Promise<void> {}
+  async dispose(): Promise<void> {
+    this.disposed = true
+  }
+}
+
+describe('A2aServer.reconcileAgents (dynamic served agents)', () => {
+  it('adds a new served agent live and serves its card at its own path', async () => {
+    const port = await freePort()
+    const server = new A2aServer({
+      config: resolveConfig({ server: { host: '127.0.0.1', port } }).server,
+      agents: [{ agent: testAgent, executor: new FakeExecutor() as unknown as AgentExecutor }],
+    })
+    await server.start()
+    try {
+      const added = { ...testAgent, id: 'extra', name: 'extra-agent' }
+      server.reconcileAgents(
+        [testAgent, added],
+        () => new FakeExecutor() as unknown as AgentExecutor,
+      )
+      const response = await fetch(`${server.url}agents/extra/.well-known/agent-card.json`)
+      expect(response.status).toBe(200)
+      const card = (await response.json()) as { name: string }
+      expect(card.name).toBe('extra-agent')
+    } finally {
+      await server.stop()
+    }
+  })
+
+  it('re-identifies an existing agent without rebuilding its executor', async () => {
+    const port = await freePort()
+    const original = new FakeExecutor()
+    const server = new A2aServer({
+      config: resolveConfig({ server: { host: '127.0.0.1', port } }).server,
+      agents: [{ agent: testAgent, executor: original as unknown as AgentExecutor }],
+    })
+    await server.start()
+    try {
+      const renamed = { ...testAgent, name: 'renamed-agent' }
+      server.reconcileAgents([renamed], () => new FakeExecutor() as unknown as AgentExecutor)
+      expect(original.disposed).toBe(false)
+      const response = await fetch(`${server.url}.well-known/agent-card.json`)
+      const card = (await response.json()) as { name: string }
+      expect(card.name).toBe('renamed-agent')
+    } finally {
+      await server.stop()
+    }
+  })
+
+  it('removes a dropped served agent live and disposes its executor', async () => {
+    const port = await freePort()
+    const toRemove = new FakeExecutor()
+    const server = new A2aServer({
+      config: resolveConfig({ server: { host: '127.0.0.1', port } }).server,
+      agents: [{ agent: testAgent, executor: toRemove as unknown as AgentExecutor }],
+    })
+    await server.start()
+    try {
+      server.reconcileAgents([], () => new FakeExecutor() as unknown as AgentExecutor)
+      // removeAgent is fire-and-forget; let the async dispose settle.
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      expect(toRemove.disposed).toBe(true)
+      const root = await fetch(`${server.url}.well-known/agent-card.json`)
+      expect(root.status).toBe(200)
+      const gone = await fetch(`${server.url}agents/test/.well-known/agent-card.json`)
+      expect(gone.status).toBe(404)
+    } finally {
+      await server.stop()
+    }
   })
 })
