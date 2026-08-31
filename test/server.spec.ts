@@ -4,6 +4,7 @@
  * end to end with the official A2A client.
  */
 
+import { basename, join } from 'node:path'
 import type { Message } from '@a2a-js/sdk'
 import { Role as RoleEnum, TaskState } from '@a2a-js/sdk'
 import { ClientFactory, ClientFactoryOptions } from '@a2a-js/sdk/client'
@@ -350,12 +351,15 @@ describe('A2A server with a harness executor', () => {
   it('creates A2A agents with a model route and the A2A workspace metadata', async () => {
     const agents = new Map<string, FakeAgent>()
     const ctx = fakeCtx(agents)
-    const creates: Array<{ meta?: unknown; agentOptions?: unknown }> = []
+    const creates: Array<{
+      meta?: { cwd?: string; agentPreset?: string }
+      agentOptions?: unknown
+    }> = []
     ;(
       ctx as unknown as {
         agents: {
           create: (options: {
-            meta?: unknown
+            meta?: { cwd?: string; agentPreset?: string }
             agentOptions?: unknown
           }) => Promise<{ agent: FakeAgent; dispose: () => Promise<void> }>
         }
@@ -389,10 +393,12 @@ describe('A2A server with a harness executor', () => {
       bus,
     )
     expect(creates[0]?.agentOptions).toEqual({ provider: 'test-provider', model: 'test-model' })
-    expect(creates[0]?.meta).toMatchObject({
-      cwd: expect.stringMatching(/^\/tmp\/a2a-ws-test\/A2A-ctx-1-\d{4}-\d{6}-9fa507$/),
-      agentPreset: 'standard',
-    })
+    // sessionDir() joins, so the separator follows the host platform: assert
+    // the session dir sits in the configured root rather than its spelling.
+    const cwd = creates[0]?.meta?.cwd ?? ''
+    expect(cwd).toBe(join('/tmp/a2a-ws-test', basename(cwd)))
+    expect(basename(cwd)).toMatch(/^A2A-ctx-1-\d{4}-\d{6}-9fa507$/)
+    expect(creates[0]?.meta).toMatchObject({ agentPreset: 'standard' })
   })
 
   it('validates the A2A workspace defaults and the provider/model pair', () => {

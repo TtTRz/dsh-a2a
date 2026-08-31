@@ -24,6 +24,8 @@ export interface ServerInfoValue {
   apiKeySet: boolean
   /** The endpoint Bearer key (surfaced for operators; the UI masks it). */
   apiKey?: string
+  /** Whether callers may override preset/model per request. */
+  allowOverrides: boolean
   provider?: string
   model?: string
   preset: string

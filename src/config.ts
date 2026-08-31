@@ -50,6 +50,12 @@ export interface ServerOptions {
   cwd?: string
   /** Sidebar workspace title grouping A2A conversations (defaults to "A2A"). */
   workspaceTitle?: string
+  /**
+   * Whether a caller may pick the preset and the model route per request
+   * through the A2A `metadata` map (defaults to true). Off means the
+   * deployment's route always wins and a request's override is dropped.
+   */
+  allowOverrides?: boolean
 }
 
 export interface AgentEntry {
@@ -150,6 +156,7 @@ export const Config: z<Config> = z.object({
     model: z.string(),
     cwd: z.string(),
     workspaceTitle: z.string().default('A2A'),
+    allowOverrides: z.boolean().default(true),
   }),
   agents: z
     .array(
@@ -195,6 +202,8 @@ export interface ResolvedServer {
   model?: string
   cwd: string
   workspaceTitle: string
+  /** Whether callers may override the preset and the model route per request. */
+  allowOverrides: boolean
 }
 
 export interface ResolvedAgentEntry {
@@ -260,8 +269,12 @@ export function normalizeServerAgent(
       (row.workspaceTitle ?? '').trim() || known?.workspaceTitle || defaults.workspaceTitle,
     skills:
       Array.isArray(row.skills) && row.skills.length > 0
-        ? row.skills.map((skill) => ({ id: skill.id, name: skill.name, description: skill.description }))
-        : known?.skills ?? [],
+        ? row.skills.map((skill) => ({
+            id: skill.id,
+            name: skill.name,
+            description: skill.description,
+          }))
+        : (known?.skills ?? []),
   }
 }
 
@@ -469,6 +482,7 @@ export function resolveConfig(input: Config): ResolvedConfig {
       model,
       cwd,
       workspaceTitle,
+      allowOverrides: server.allowOverrides !== false,
       agentCard: {
         name: server.agentCard?.name ?? 'dsh-a2a',
         description:

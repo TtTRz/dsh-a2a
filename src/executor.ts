@@ -7,6 +7,12 @@
  * conversation was opened in the web UI); otherwise a new one is created
  * with the configured preset mounted.
  *
+ * A caller may pick the preset and the model route per request through the
+ * A2A `metadata` map. The two ride different lifetimes, because that is what
+ * the harness gives them: a preset composes an agent and therefore applies
+ * on the request that creates the session, while the model is a per-step
+ * route a live session can be switched onto.
+ *
  * @module dsh-a2a/executor
  */
 
@@ -43,7 +49,39 @@ export interface ExecutorOptions {
   /** Explicit model route; falls back to the harness default model. */
   provider?: string
   model?: string
+  /** Whether callers may override the preset and the model route per request. */
+  allowOverrides?: boolean
 }
+
+/**
+ * What one request asked for through the A2A `metadata` map. Absent means
+ * "use whatever the deployment configured", never "use nothing".
+ */
+export interface RequestOverrides {
+  /** Preset id; applied on the request that creates the session. */
+  preset?: string
+  /** Provider route; paired with `model` or with the configured model. */
+  provider?: string
+  /** Model id, overriding `server.model`. */
+  model?: string
+}
+
+/** Metadata keys naming the preset; the first one present wins. */
+const PRESET_KEYS = ['agentPreset', 'preset'] as const
+/** Metadata key naming the model. */
+const MODEL_KEY = 'model'
+/** Metadata key naming the provider route. */
+const PROVIDER_KEY = 'provider'
+
+/**
+ * A preset id becomes a directory name, so what could reach outside the
+ * preset root is refused here rather than at the filesystem.
+ */
+const PRESET_VALUE = /^[A-Za-z0-9._-]{1,64}$/
+/** Provider routes are registry keys, so they stay path-safe too. */
+const PROVIDER_VALUE = /^[A-Za-z0-9._-]{1,64}$/
+/** Model ids are provider-owned and carry their own punctuation. */
+const MODEL_VALUE = /^[A-Za-z0-9._:@/-]{1,128}$/
 
 interface WorkspaceRegistry {
   create(path: string, title: string): Promise<Workspace>
@@ -58,6 +96,12 @@ interface ModelSelection {
   model: string
 }
 
+/** The mutable model route one agent reads per step; see `installModelSelection`. */
+interface ModelSelectionRef {
+  current: ModelSelection | undefined
+  assembled: ModelSelection | undefined
+}
+
 interface RunningTurn {
   agent: Agent
   dispose: () => Promise<void>
@@ -69,6 +113,97 @@ interface RunningTurn {
 export function sessionIdFor(agentId: string, contextId: string): SessionId {
   const digest = createHash('sha256').update(contextId).digest('hex').slice(0, 24)
   return SessionId(`a2a-${agentId}-${digest}`)
+}
+
+/**
+ * Read the overrides one request asked for on the A2A `metadata` map.
+ *
+ * The message-level map wins over the request-level one: a caller that knows
+ * only one of the two still works, and a caller that writes both — a common
+ * defensive habit, and what this plugin's own Java client does — is
+ * unambiguous rather than order-dependent.
+ *
+ * @param params - the `SendMessageRequest` a transport handed to the executor.
+ * @param message - the inbound user `Message`.
+ * @returns the overrides; empty when the request named none.
+ * @throws when a key carries a value that cannot be honoured. An override is
+ *   a request, and answering on a different preset or model than the caller
+ *   named — because its value did not parse — is the one outcome it cannot
+ *   detect, so it fails the task instead.
+ */
+export function requestOverrides(params: unknown, message: unknown): RequestOverrides {
+  const merged = mergeMetadata(metadataOf(params), metadataOf(message))
+  const preset = pick(merged, PRESET_KEYS, PRESET_VALUE)
+  const provider = pick(merged, [PROVIDER_KEY], PROVIDER_VALUE)
+  const model = pick(merged, [MODEL_KEY], MODEL_VALUE)
+  return {
+    ...(preset === undefined ? {} : { preset }),
+    ...(provider === undefined ? {} : { provider }),
+    ...(model === undefined ? {} : { model }),
+  }
+}
+
+/** The `metadata` map of one A2A object; empty when it carries none. */
+function metadataOf(value: unknown): Record<string, unknown> {
+  if (typeof value !== 'object' || value === null) return {}
+  const metadata = (value as { metadata?: unknown }).metadata
+  if (typeof metadata !== 'object' || metadata === null) return {}
+  return metadata as Record<string, unknown>
+}
+
+/** Overlay two metadata maps, later-wins, without an explicit `undefined` clobbering. */
+function mergeMetadata(...sources: readonly Record<string, unknown>[]): Record<string, unknown> {
+  const merged: Record<string, unknown> = {}
+  for (const source of sources) {
+    for (const [key, value] of Object.entries(source)) {
+      if (value !== undefined) merged[key] = value
+    }
+  }
+  return merged
+}
+
+/**
+ * The first present, non-blank value among `keys`, checked against `pattern`.
+ * A blank value means "not specified" — the way an empty form field reads —
+ * while a non-string is a caller bug worth failing on.
+ */
+function pick(
+  metadata: Record<string, unknown>,
+  keys: readonly string[],
+  pattern: RegExp,
+): string | undefined {
+  for (const key of keys) {
+    const raw = metadata[key]
+    if (raw === undefined || raw === null) continue
+    if (typeof raw !== 'string') {
+      throw new Error(`dsh-a2a: metadata.${key} must be a string, got ${typeof raw}`)
+    }
+    const value = raw.trim()
+    if (value.length === 0) continue
+    if (!pattern.test(value)) {
+      throw new Error(
+        `dsh-a2a: metadata.${key} must match ${String(pattern)}, got ${JSON.stringify(value)}`,
+      )
+    }
+    return value
+  }
+  return undefined
+}
+
+/**
+ * Render a preset resolution failure the way a caller can act on it: the
+ * roster service throws with the ids it does supply, and naming those beats
+ * a bare "unknown preset" for a caller guessing across deployments.
+ *
+ * Duck-typed, not `instanceof`: this package reaches the service through
+ * `ctx.get` rather than through a dependency it could import the class from.
+ */
+function describePresetError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error)
+  const available = (error as { available?: unknown } | null)?.available
+  return Array.isArray(available) && available.length > 0
+    ? `${message} (available: ${available.join(', ')})`
+    : message
 }
 
 /** Build an A2A text part. */
@@ -175,7 +310,10 @@ function status(
  */
 export class DshAgentExecutor implements AgentExecutor {
   private readonly running = new Map<string, RunningTurn>()
-  private presetPromise?: Promise<string>
+  /** Resolved preset ids by preset name; discovery re-reads the roots per call. */
+  private readonly presetIds = new Map<string, Promise<string>>()
+  /** The mutable model route of every agent this instance created, by session id. */
+  private readonly selections = new Map<string, ModelSelectionRef>()
   private workspacePromise?: Map<string, Promise<Workspace | undefined>>
 
   constructor(
@@ -205,7 +343,12 @@ export class DshAgentExecutor implements AgentExecutor {
       }),
     )
     try {
-      const turn = await this.openTurn(sessionIdFor(this.options.agentId, contextId), contextId)
+      const overrides = this.overridesOf(requestContext, contextId)
+      const turn = await this.openTurn(
+        sessionIdFor(this.options.agentId, contextId),
+        contextId,
+        overrides,
+      )
       this.running.set(taskId, turn)
       turn.agent.followup(
         createUserMessage({
@@ -336,8 +479,36 @@ export class DshAgentExecutor implements AgentExecutor {
     }
   }
 
+  /**
+   * The overrides this request carries, or none when the deployment refuses
+   * them.
+   *
+   * A refused override is logged rather than failed: the caller asked for a
+   * policy the deployment does not grant, and answering on the deployment's
+   * own route beats an error a caller that is not its operator cannot act on.
+   */
+  private overridesOf(requestContext: RequestContext, contextId: string): RequestOverrides {
+    const overrides = requestOverrides(requestContext.request, requestContext.userMessage)
+    const keys = Object.keys(overrides)
+    if (keys.length === 0) return overrides
+    if (this.options.allowOverrides === false) {
+      this.ctx.logger.warn(
+        `dsh-a2a: ignored request overrides for context ${contextId} (${JSON.stringify(overrides)}): server.allowOverrides is false`,
+      )
+      return {}
+    }
+    this.ctx.logger.info(
+      `dsh-a2a: request overrides for context ${contextId}: ${JSON.stringify(overrides)}`,
+    )
+    return overrides
+  }
+
   /** Adopt the live agent for a session, or create one with the preset mounted. */
-  private async openTurn(sessionId: SessionId, contextId: string): Promise<RunningTurn> {
+  private async openTurn(
+    sessionId: SessionId,
+    contextId: string,
+    overrides: RequestOverrides,
+  ): Promise<RunningTurn> {
     const live = this.ctx.agents.get(sessionId)
     if (live !== undefined) {
       // Adopted agents were attached to their per-session workspace when they
@@ -345,9 +516,22 @@ export class DshAgentExecutor implements AgentExecutor {
       // path, which only matches the creator's row); re-attaching here could
       // mint an empty row for a session whose stored cwd predates per-session
       // dirs, so skip it.
+      //
+      // A preset composes an agent, so it applies on the request that creates
+      // the session — not here. Swapping a live session's tools mid
+      // conversation would leave logged tool calls the new composition cannot
+      // make, so the override is dropped rather than applied; say so, because
+      // answering on a different preset than requested is otherwise invisible
+      // to the caller.
+      if (overrides.preset !== undefined) {
+        this.ctx.logger.warn(
+          `dsh-a2a: preset override ${JSON.stringify(overrides.preset)} ignored for context ${contextId}: the session already exists; a preset applies on the request that creates it`,
+        )
+      }
+      this.applyModelOverride(String(sessionId), contextId, overrides)
       return { agent: live, dispose: async () => undefined, sessionId, contextId }
     }
-    const selection = this.modelSelection()
+    const selection = this.modelSelection(overrides)
     if (selection === undefined) {
       throw new Error(
         'dsh-a2a: no model route for A2A agents; set server.provider/server.model or the default model',
@@ -361,9 +545,23 @@ export class DshAgentExecutor implements AgentExecutor {
           mount(agentCtx: Context, id: string): Promise<void>
         }
       | undefined
-    const presetId = presets === undefined ? undefined : await this.resolvePreset(presets)
+    const presetName = overrides.preset ?? this.options.preset
+    let presetId: string | undefined
+    if (presets !== undefined) {
+      try {
+        presetId = await this.resolvePreset(presets, presetName)
+      } catch (error) {
+        throw new Error(
+          `dsh-a2a: cannot mount preset ${JSON.stringify(presetName)}: ${describePresetError(error)}`,
+        )
+      }
+    }
     const cwd = this.sessionDir(sessionId, contextId)
     await mkdir(cwd, { recursive: true })
+    // The ref is mutable because the model is a per-step route: a later
+    // request may switch this session onto another model without losing the
+    // conversation (see applyModelOverride).
+    const ref: ModelSelectionRef = { current: selection, assembled: undefined }
     const handle = await this.ctx.agents.create({
       sessionId,
       meta: { cwd, ...(presetId === undefined ? {} : { agentPreset: presetId }) },
@@ -372,15 +570,75 @@ export class DshAgentExecutor implements AgentExecutor {
         if (presets !== undefined && presetId !== undefined) {
           await presets.mount(agentCtx, presetId)
         }
-        installModelSelection(agentCtx, { current: selection, assembled: undefined })
+        installModelSelection(agentCtx, ref)
       },
     })
+    this.selections.set(String(sessionId), ref)
+    this.ctx.logger.info(
+      `dsh-a2a: context ${contextId} → session ${String(sessionId)} (preset ${presetId ?? 'none'}, ${selection.provider}/${selection.model})`,
+    )
     void this.attachToWorkspace(String(sessionId), contextId)
     return { agent: handle.agent, dispose: handle.dispose, sessionId, contextId }
   }
 
-  /** Resolve the model route for new agents: explicit config, then the harness default. */
-  private modelSelection(): ModelSelection | undefined {
+  /**
+   * Switch a live session onto the model route this request named.
+   *
+   * The selection is a mutable ref the agent reads per step, so the next turn
+   * answers on the new model while the conversation — and the KV-cache prefix
+   * its history already earned — survives. Only sessions this executor
+   * instance created carry such a ref; one adopted from outside it (opened in
+   * the web UI, or resumed from disk) has no handle to switch, so the answer
+   * keeps the route it was created with.
+   */
+  private applyModelOverride(
+    sessionKey: string,
+    contextId: string,
+    overrides: RequestOverrides,
+  ): void {
+    if (overrides.model === undefined && overrides.provider === undefined) return
+    const selection = this.modelSelection(overrides)
+    const ref = this.selections.get(sessionKey)
+    if (selection === undefined || ref === undefined) {
+      this.ctx.logger.warn(
+        `dsh-a2a: model override ignored for context ${contextId}: the session was not created by this executor instance`,
+      )
+      return
+    }
+    ref.current = selection
+    ref.assembled = undefined
+    this.ctx.logger.info(
+      `dsh-a2a: context ${contextId} switched to ${selection.provider}/${selection.model}`,
+    )
+  }
+
+  /**
+   * Resolve the model route for one turn: a request override wins over the
+   * configured route, which wins over the harness default.
+   *
+   * A caller that names only a model has it paired with the configured (or
+   * default) provider: callers know the model they want, not the route
+   * serving it.
+   *
+   * @throws when the request names a route half no other source completes —
+   *   routing the turn to a model the caller did not ask for is worse than
+   *   failing.
+   */
+  private modelSelection(overrides: RequestOverrides = {}): ModelSelection | undefined {
+    const route = this.configuredSelection()
+    const provider = overrides.provider ?? route?.provider
+    const model = overrides.model ?? route?.model
+    if (provider !== undefined && model !== undefined) return { provider, model }
+    if (overrides.provider !== undefined || overrides.model !== undefined) {
+      throw new Error(
+        'dsh-a2a: the request overrode the model route but no provider/model pair could be completed; set server.provider and server.model',
+      )
+    }
+    return undefined
+  }
+
+  /** The route this deployment answers on: explicit config, else the harness default. */
+  private configuredSelection(): ModelSelection | undefined {
     if (this.options.provider !== undefined && this.options.model !== undefined) {
       return { provider: this.options.provider, model: this.options.model }
     }
@@ -496,10 +754,29 @@ export class DshAgentExecutor implements AgentExecutor {
     return join(base, `A2A-${slug}-${stamp}-${hash6}`)
   }
 
-  private resolvePreset(presets: {
-    resolve(name: string): Promise<{ id: string }>
-  }): Promise<string> {
-    this.presetPromise ??= presets.resolve(this.options.preset).then((p) => p.id)
-    return this.presetPromise
+  /**
+   * Resolve one preset id by name.
+   *
+   * Discovery re-reads the roots on every call — so a preset authored while
+   * the process runs is visible immediately — which is also why results are
+   * cached per name instead of re-resolved per session. A rejection is
+   * forgotten, the way the workspace table forgets a miss, so a preset whose
+   * file is fixed becomes usable without a restart.
+   */
+  private resolvePreset(
+    presets: { resolve(name: string): Promise<{ id: string }> },
+    name: string,
+  ): Promise<string> {
+    const cached = this.presetIds.get(name)
+    if (cached !== undefined) return cached
+    const pending = presets.resolve(name).then(
+      (preset) => preset.id,
+      (error: unknown) => {
+        if (this.presetIds.get(name) === pending) this.presetIds.delete(name)
+        throw error
+      },
+    )
+    this.presetIds.set(name, pending)
+    return pending
   }
 }
