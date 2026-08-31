@@ -16,6 +16,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import {
   type AgentEntry,
+  type AgentSkillSpec,
   normalizeAgents,
   normalizeServerAgents,
   type ResolvedAgentEntry,
@@ -42,6 +43,8 @@ export interface ServerAgentSpec {
   workspaceTitle: string
   provider?: string
   model?: string
+  /** Abilities advertised on the Agent Card (inherited from the base by id). */
+  skills?: AgentSkillSpec[]
 }
 
 /** The section the settings schema resolves; see {@link A2aSettings}. */
@@ -80,6 +83,15 @@ export const AgentSpecSettings = z.object({
   workspaceTitle: z.string().default(''),
   provider: z.string(),
   model: z.string(),
+  skills: z
+    .array(
+      z.object({
+        id: z.string(),
+        name: z.string(),
+        description: z.string(),
+      }),
+    )
+    .default([]),
 })
 
 /**

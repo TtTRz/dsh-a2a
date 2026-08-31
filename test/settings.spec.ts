@@ -76,6 +76,7 @@ const BASE = {
   preset: 'standard',
   cwd: '/tmp/a2a-sessions',
   workspaceTitle: 'A2A',
+  skills: [],
 }
 const IDENTITY = [BASE]
 
@@ -144,6 +145,7 @@ describe('attachSettings', () => {
           workspaceTitle: 'A2A',
           provider: undefined,
           model: undefined,
+          skills: [],
         },
       ],
     })

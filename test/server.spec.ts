@@ -477,4 +477,41 @@ describe('A2aServer.reconcileAgents (dynamic served agents)', () => {
       await server.stop()
     }
   })
+
+  it('advertises configured skills on the Agent Card', async () => {
+    const port = await freePort()
+    const server = new A2aServer({
+      config: resolveConfig({ server: { host: '127.0.0.1', port } }).server,
+      agents: [
+        {
+          agent: {
+            ...testAgent,
+            skills: [{ id: 'query-grey', name: '查询灰度版本', description: '查询基础库灰度进度' }],
+          },
+          executor: new FakeExecutor() as unknown as AgentExecutor,
+        },
+      ],
+    })
+    await server.start()
+    try {
+      const response = await fetch(`${server.url}.well-known/agent-card.json`)
+      const card = (await response.json()) as {
+        skills?: Array<{ id: string; name: string; description: string }>
+      }
+      expect(card.skills).toEqual([
+        {
+          id: 'query-grey',
+          name: '查询灰度版本',
+          description: '查询基础库灰度进度',
+          tags: [],
+          examples: [],
+          inputModes: ['text'],
+          outputModes: ['text'],
+          securityRequirements: [],
+        },
+      ])
+    } finally {
+      await server.stop()
+    }
+  })
 })
