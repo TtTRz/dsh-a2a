@@ -492,7 +492,7 @@ describe('A2aServer.reconcileAgents (dynamic served agents)', () => {
         {
           agent: {
             ...testAgent,
-            skills: [{ id: 'query-grey', name: '查询灰度版本', description: '查询基础库灰度进度' }],
+            skills: [{ id: 'query-orders', name: '查询订单', description: '查询订单进度' }],
           },
           executor: new FakeExecutor() as unknown as AgentExecutor,
         },
@@ -506,9 +506,9 @@ describe('A2aServer.reconcileAgents (dynamic served agents)', () => {
       }
       expect(card.skills).toEqual([
         {
-          id: 'query-grey',
-          name: '查询灰度版本',
-          description: '查询基础库灰度进度',
+          id: 'query-orders',
+          name: '查询订单',
+          description: '查询订单进度',
           tags: [],
           examples: [],
           inputModes: ['text'],

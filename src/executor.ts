@@ -36,7 +36,7 @@ import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import { SessionId } from '@deepseek-ai/dsh-session'
 
 export interface ExecutorOptions {
-  /** URL slug of this agent (namespaces the session id, e.g. 'mp-perf'). */
+  /** URL slug of this agent (namespaces the session id, e.g. 'docs'). */
   agentId: string
   /** Preset mounted into each conversation agent. */
   preset: string
