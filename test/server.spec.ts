@@ -184,6 +184,50 @@ describe('A2A server with a harness executor', () => {
     }
   })
 
+  it('answers a blocking REST message:send with the agent reply', async () => {
+    const port = await freePort()
+    const agents = new Map<string, FakeAgent>()
+    const server = new A2aServer({
+      config: resolveConfig({ server: { host: '127.0.0.1', port } }).server,
+      agents: [
+        {
+          agent: testAgent,
+          executor: new DshAgentExecutor(fakeCtx(agents), {
+            agentId: 'test',
+            preset: 'standard',
+            turnTimeoutMs: 10_000,
+          }),
+        },
+      ],
+    })
+    await server.start()
+    try {
+      // The REST surface takes a JSON body; a Buffer must be parsed as text
+      // before restBody reads `.message` (issue #1).
+      const response = await fetch(`${server.url}agents/test/message:send`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          tenant: '',
+          message: userMessage('hello'),
+          configuration: undefined,
+          metadata: undefined,
+        }),
+      })
+      expect(response.status).toBe(200)
+      const task = (await response.json()) as {
+        status: { state: TaskState; message?: Message }
+      }
+      expect(task.status.state).toBe(TaskState.TASK_STATE_COMPLETED)
+      const reply = (task.status.message?.parts ?? [])
+        .map((part) => (part.content?.$case === 'text' ? part.content.value : ''))
+        .join('')
+      expect(reply).toBe('pong')
+    } finally {
+      await server.stop()
+    }
+  })
+
   it('keeps per-context sessions and continues the same agent', async () => {
     const port = await freePort()
     const agents = new Map<string, FakeAgent>()

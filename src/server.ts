@@ -363,7 +363,8 @@ export class A2aServer {
       return
     }
     if (req.method === 'POST' && sub === 'message:send') {
-      const body = await readBody(req)
+      const raw = (await readBody(req)).toString('utf8')
+      const body = raw.length > 0 ? JSON.parse(raw) : {}
       sendJson(res, 200, await route.handler.sendMessage(restBody(body), new ServerCallContext()))
       return
     }
