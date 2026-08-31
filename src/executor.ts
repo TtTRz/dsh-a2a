@@ -630,9 +630,15 @@ export class DshAgentExecutor implements AgentExecutor {
     const model = overrides.model ?? route?.model
     if (provider !== undefined && model !== undefined) return { provider, model }
     if (overrides.provider !== undefined || overrides.model !== undefined) {
-      throw new Error(
-        'dsh-a2a: the request overrode the model route but no provider/model pair could be completed; set server.provider and server.model',
+      // A half-override the deployment cannot complete (e.g. a bare model with
+      // no provider anywhere): fall back to the configured/default route rather
+      // than failing the task. A caller cannot act on an error naming a route it
+      // does not administer, so answer on the route it would get without the
+      // override and say so.
+      this.ctx.logger.warn(
+        'dsh-a2a: ignored a model override the deployment could not complete (no provider/model pair); using the configured route',
       )
+      return route
     }
     return undefined
   }

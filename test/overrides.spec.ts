@@ -323,7 +323,14 @@ describe('per-request overrides in the executor', () => {
     expect(warns).toEqual([])
   })
 
-  it('fails the task when a bare model has no provider to pair with', async () => {
+  it('pairs a bare model override with the configured provider', async () => {
+    const { creates, executor } = harness()
+    await send(executor, 'ctx-bare', { model: 'deepseek-pro' })
+    // No provider named, so the configured default provider completes the pair.
+    expect(creates[0]?.agentOptions).toEqual({ provider: 'cfg-provider', model: 'deepseek-pro' })
+  })
+
+  it('falls back instead of failing when a bare model has no provider to pair with', async () => {
     const noDefault = harness()
     // Drop the default-model service so there is no provider anywhere.
     ;(noDefault.ctx as unknown as { get: (name: string) => unknown }).get = (name: string) =>
@@ -337,6 +344,8 @@ describe('per-request overrides in the executor', () => {
       cwd: SESSION_ROOT,
     })
     await send(bare, 'ctx-2', { model: 'deepseek-v4-pro' })
-    expect(replies().join('\n')).toMatch(/no provider\/model pair could be completed/)
+    // The deployment has no route at all, so the task still cannot run — but
+    // the failure is the deployment's "no model route", not an override error.
+    expect(replies().join('\n')).toMatch(/no model route/)
   })
 })
