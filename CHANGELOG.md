@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.1] - 2026-08-31
+
+### Changed
+
+- **Served-agent cards are editable per card** (settings tab) — the inbound
+  panel merged the read-only Agent Card list with the global "edit identity"
+  mode into per-card editing: each agent is one card with its own Edit /
+  Remove, Edit expands that single card's form (id / name / description /
+  preset / cwd / workspace / provider / model), and "Add agent" appends a card
+  and opens it. The draft re-seeds from the served set on an external write /
+  reset / save without clobbering an in-progress edit.
+- **Inbound summary decluttered** — the model-route (“follows the harness
+  default”), preset, and caller-override info rows were removed from the
+  inbound grid; status / listen / public URL / workspace group and the
+  auth-token block stay.
+- **Tutorial no longer inlines a card address** — the how-to popover points at
+  the address on each agent card instead of rendering a single URL (the cards
+  already show it); `tutorialStep1` copy updated accordingly.
+
 ## [0.7.0] - 2026-08-31
 
 ### Added
