@@ -15,7 +15,7 @@ function refOf(
 }
 
 describe('serverInfoOf', () => {
-  it('projects the resolved config and reduces apiKey to a boolean', () => {
+  it('projects the resolved config and surfaces the apiKey for operators', () => {
     const info = serverInfoOf(
       refOf({
         host: '127.0.0.1',
@@ -32,14 +32,13 @@ describe('serverInfoOf', () => {
       host: '127.0.0.1',
       port: 9001,
       apiKeySet: true,
+      apiKey: 'super-secret-token',
       provider: 'venus',
       model: 'deepseek-v4-flash-official',
       preset: 'mp',
       workspaceTitle: 'A2A',
       agentCard: { name: 'n', description: 'd', version: '1' },
     })
-    // The key itself must never be part of the wire-safe summary.
-    expect(JSON.stringify(info)).not.toContain('super-secret-token')
   })
 
   it('reflects the settings-merged agent card identity', () => {

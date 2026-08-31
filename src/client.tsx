@@ -37,7 +37,7 @@ import {
   rowsFromAgents,
   type StoredAgent,
 } from './card-state.js'
-import { fetchServerInfo, probeCard, type ServerInfoValue } from './client-api.js'
+import { fetchServerInfo, probeCard, regenerateKey, type ServerInfoValue } from './client-api.js'
 
 /** The settings namespace this card claims; must match the Host registration. */
 const NAMESPACE = 'a2a'
@@ -185,6 +185,12 @@ const COPY: { zh: Dictionary; en: Dictionary } = {
     inboundAuth: '鉴权',
     inboundAuthOn: '已启用 Bearer token',
     inboundAuthOff: '未启用（端口仅限本机/受信网络）',
+    authShow: '显示',
+    authHide: '隐藏',
+    authCopy: '复制',
+    authCopied: '已复制',
+    authRefresh: '刷新 token',
+    authRefreshing: '刷新中…',
     inboundModel: '模型路由',
     inboundModelDefault: '跟随 harness 默认模型',
     inboundPreset: 'Preset',
@@ -281,6 +287,12 @@ const COPY: { zh: Dictionary; en: Dictionary } = {
     inboundAuth: 'Auth',
     inboundAuthOn: 'Bearer token enforced',
     inboundAuthOff: 'None (keep the port local / behind a trusted network)',
+    authShow: 'Show',
+    authHide: 'Hide',
+    authCopy: 'Copy',
+    authCopied: 'Copied',
+    authRefresh: 'Rotate token',
+    authRefreshing: 'Rotating…',
     inboundModel: 'Model route',
     inboundModelDefault: 'Follows the harness default model',
     inboundPreset: 'Preset',
@@ -1097,6 +1109,9 @@ function ServerInfoPanel(props: { scope: ScopeLike }): ReactNode {
   const [loading, setLoading] = useState(true)
   const [failed, setFailed] = useState(false)
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null)
+  const [showToken, setShowToken] = useState(false)
+  const [tokenCopied, setTokenCopied] = useState(false)
+  const [refreshingToken, setRefreshingToken] = useState(false)
   const [identityRows, setIdentityRows] = useState<IdentityRow[]>([])
   const [savingIdentity, setSavingIdentity] = useState(false)
   const [editingIdentity, setEditingIdentity] = useState(false)
@@ -1190,6 +1205,27 @@ function ServerInfoPanel(props: { scope: ScopeLike }): ReactNode {
       setCopiedUrl(url)
       setTimeout(() => setCopiedUrl(null), 2000)
     })
+  }
+  const copyToken = (token: string): void => {
+    if (token.length === 0 || typeof navigator === 'undefined') return
+    void navigator.clipboard.writeText(token).then(() => {
+      setTokenCopied(true)
+      setTimeout(() => setTokenCopied(false), 2000)
+    })
+  }
+  const refreshToken = async (): Promise<void> => {
+    if (refreshingToken) return
+    setRefreshingToken(true)
+    try {
+      const apiKey = await regenerateKey()
+      setInfo((current) => (current === null ? current : { ...current, apiKey, apiKeySet: true }))
+      setShowToken(true)
+      setFailed(false)
+    } catch {
+      setFailed(true)
+    } finally {
+      setRefreshingToken(false)
+    }
   }
   const tutorialUrl = agentCardUrl(serverAgents[0]?.id) ?? rootCardUrl
   const overridden =
@@ -1288,7 +1324,6 @@ function ServerInfoPanel(props: { scope: ScopeLike }): ReactNode {
             )}
             {row(t.inboundListen, `${info.host}:${String(info.port)}`)}
             {row(t.inboundPublicUrl, info.publicUrl ?? `http://${info.host}:${String(info.port)}/`)}
-            {row(t.inboundAuth, info.apiKeySet ? t.inboundAuthOn : t.inboundAuthOff)}
             {row(
               t.inboundModel,
               info.provider !== undefined && info.model !== undefined
@@ -1297,6 +1332,58 @@ function ServerInfoPanel(props: { scope: ScopeLike }): ReactNode {
             )}
             {row(t.inboundPreset, info.preset)}
             {row(t.inboundWorkspace, info.workspaceTitle)}
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            <span style={{ fontSize: '12px', fontWeight: 600, color: cssVars.labelPrimary }}>
+              {t.inboundAuth}
+            </span>
+            {info.apiKey !== undefined && info.apiKey.length > 0 ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0 }}>
+                <code
+                  style={{
+                    minWidth: 0,
+                    flex: '1',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: showToken ? 'normal' : 'nowrap',
+                    fontSize: '12px',
+                    color: cssVars.labelSecondary,
+                    wordBreak: showToken ? 'break-all' : 'normal',
+                  }}
+                >
+                  {showToken ? info.apiKey : '••••••••••••••••'}
+                </code>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  style={{ flex: 'none' }}
+                  onClick={() => setShowToken((v) => !v)}
+                >
+                  {showToken ? t.authHide : t.authShow}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  style={{ flex: 'none' }}
+                  onClick={() => copyToken(info.apiKey ?? '')}
+                >
+                  {tokenCopied ? t.authCopied : t.authCopy}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  style={{ flex: 'none' }}
+                  onClick={() => void refreshToken()}
+                  disabled={refreshingToken || !writable}
+                >
+                  {refreshingToken ? t.authRefreshing : t.authRefresh}
+                </Button>
+              </div>
+            ) : (
+              <span style={{ fontSize: '12px', color: cssVars.labelTertiary }}>
+                {t.inboundAuthOff}
+              </span>
+            )}
           </div>
           {serverAgents.length > 0 ? (
             <div

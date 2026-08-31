@@ -66,7 +66,6 @@ export function apply(ctx: Context, config: PluginConfig): void {
       description: primaryCard?.description ?? resolved.server.agentCard.description,
     },
   }
-  registerA2aRoutes(ctx, serverRef)
   let server: A2aServer | undefined
   const buildExecutor = (agent: ResolvedAgentSpec): DshAgentExecutor =>
     new DshAgentExecutor(ctx, {
@@ -105,15 +104,16 @@ export function apply(ctx: Context, config: PluginConfig): void {
   const tools = a2aTools(registry, { callTimeoutMs: resolved.server.callTimeoutMs })
   ctx.effect(() => ctx.tools.register(tools.list), 'dsh-a2a.a2a_list')
   ctx.effect(() => ctx.tools.register(tools.call), 'dsh-a2a.a2a_call')
-  // The GUI surface: settings commits (A2A settings tab) hot-reload the tools
-  // and the served Agent Card set (add / remove / re-identity a served agent);
-  // profiles without a settings service keep the static cordis-row registry
-  // and identity.
-  attachSettings(
+  // The GUI surface: settings commits (A2A settings tab) hot-reload the tools,
+  // the served Agent Card set, and the endpoint key; profiles without a
+  // settings service keep the static cordis-row registry, identity, and key.
+  // Registered BEFORE the HTTP routes so the key-rotation persister is ready.
+  const settingsApi = attachSettings(
     ctx,
     {
       agents: resolved.agents,
       serverAgents: resolved.server.agents,
+      apiKey: resolved.server.apiKey,
     },
     {
       cwd: resolved.server.cwd,
@@ -130,8 +130,11 @@ export function apply(ctx: Context, config: PluginConfig): void {
         description: first?.description ?? '',
       }
       server?.reconcileAgents(value.serverAgents, buildExecutor)
+      // Hot-apply the endpoint key (and keep the running server in sync).
+      resolved.server.apiKey = value.apiKey
     },
   )
+  registerA2aRoutes(ctx, serverRef, settingsApi.persistApiKey)
 }
 
 /** Re-attach persisted `a2a-*` conversations to the grouping workspace. */

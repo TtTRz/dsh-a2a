@@ -48,6 +48,8 @@ export interface ServerAgentSpec {
 export interface A2aSettingsValue {
   agents: AgentEntry[]
   serverAgents: ServerAgentSpec[]
+  /** Bearer key for the A2A endpoint (empty = inherit the composition base). */
+  apiKey: string
 }
 
 /** What the plugin actually applies from a resolved section. */
@@ -55,6 +57,8 @@ export interface A2aSettingsApplied {
   agents: ResolvedAgentEntry[]
   /** The full served-agent set (identity + preset + cwd) to reconcile. */
   serverAgents: ResolvedAgentSpec[]
+  /** The served Bearer key (empty means "unset": auth stays off / base). */
+  apiKey?: string
 }
 
 /** One registry row as stored in the settings document. */
@@ -79,13 +83,14 @@ export const AgentSpecSettings = z.object({
 })
 
 /**
- * The `a2a` namespace schema: the outbound registry plus the served-agent set.
- * Blank fields fall back to the composition base (the cordis row) and the
- * server defaults, never to the hard-coded defaults.
+ * The `a2a` namespace schema: the outbound registry, the served-agent set, and
+ * the endpoint Bearer key. Blank fields fall back to the composition base (the
+ * cordis row) and the server defaults, never to the hard-coded defaults.
  */
 export const A2aSettings = z.object({
   agents: z.array(AgentEntrySettings).default([]),
   serverAgents: z.array(AgentSpecSettings).default([]),
+  apiKey: z.string().default(''),
 })
 
 /**
@@ -100,6 +105,7 @@ interface SettingsService {
   ): {
     get(): A2aSettingsValue | undefined
     watch(listener: (next: A2aSettingsValue) => void): () => void
+    set(field: string, value: unknown): Promise<void>
   }
 }
 
@@ -108,22 +114,31 @@ interface SettingsService {
  * every resolved section — the initial value included — to `onChange`.
  * Invalid rows are dropped with a warning; a blank served-agent field means
  * "inherit the composition base" (by id) then the server defaults.
+ *
+ * Returns a `persistApiKey` handle so the Host can rotate the endpoint key and
+ * store it in the settings document (survives a restart). Until the settings
+ * service is present the handle is a no-op; rotation still applies live.
  */
 export function attachSettings(
   ctx: Context,
-  base: { agents: AgentEntry[]; serverAgents: ResolvedAgentSpec[] },
+  base: { agents: AgentEntry[]; serverAgents: ResolvedAgentSpec[]; apiKey?: string },
   defaults: ServerAgentDefaults,
   onChange: (value: A2aSettingsApplied) => void,
-): void {
+): { persistApiKey(apiKey: string): void } {
+  const persister = { fn: (_apiKey: string): void => {} }
   ctx.inject(['settings'], (scoped) => {
     const settings = (scoped as unknown as { settings: SettingsService }).settings
     const scope = settings.register(SETTINGS_NAMESPACE, A2aSettings, {
       base: {
         agents: base.agents,
         serverAgents: base.serverAgents,
+        apiKey: base.apiKey ?? '',
       },
       applies: 'live',
     })
+    persister.fn = (apiKey) => {
+      void scope.set('apiKey', apiKey)
+    }
     const apply = (value: A2aSettingsValue | undefined): void => {
       if (value === undefined) return
       const { agents, rejected } = normalizeAgents(value.agents)
@@ -144,9 +159,12 @@ export function attachSettings(
           `dsh-a2a: dropped ${String(serverAgents.rejected)} invalid served-agent row(s) from settings`,
         )
       }
-      onChange({ agents, serverAgents: serverAgents.agents })
+      const apiKey =
+        typeof value.apiKey === 'string' && value.apiKey.length > 0 ? value.apiKey : base.apiKey
+      onChange({ agents, serverAgents: serverAgents.agents, apiKey })
     }
     ctx.effect(() => scope.watch(apply), 'dsh-a2a.settings.watch')
     apply(scope.get())
   })
+  return { persistApiKey: (apiKey) => persister.fn(apiKey) }
 }

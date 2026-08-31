@@ -13,6 +13,7 @@
  * @module dsh-a2a/routes
  */
 
+import { randomBytes } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Context } from '@deepseek-ai/cordis'
 import type { AgentCardProbe, ServerRef } from './typert.js'
@@ -86,15 +87,22 @@ export async function probeCard(
 }
 
 /**
- * Mount the two `/api/a2a/*` routes. The callback fiber applies once
- * `webServer` appears (immediately when already present); a plain
- * `ctx.inject(['webServer'])` would keep the plugin waiting on profiles that
- * never provide one (TUI), and `ctx.get('webServer')` inside our own fiber's
- * effect runs before the provider is active — both silently drop the routes.
- * The child fiber's disposal is registered as a parent effect, so stopping
- * the plugin unregisters every route.
+ * Mount the `/api/a2a/*` routes. The callback fiber applies once `webServer`
+ * appears (immediately when already present); a plain `ctx.inject(['webServer'])`
+ * would keep the plugin waiting on profiles that never provide one (TUI), and
+ * `ctx.get('webServer')` inside our own fiber's effect runs before the provider
+ * is active — both silently drop the routes. The child fiber's disposal is
+ * registered as a parent effect, so stopping the plugin unregisters every route.
+ *
+ * `persistKey` is invoked after a key rotation so the caller can store the new
+ * key (e.g. in the settings document) to survive a restart; rotation still
+ * applies live to the running server even when no persister is supplied.
  */
-export function registerA2aRoutes(ctx: Context, ref: ServerRef): void {
+export function registerA2aRoutes(
+  ctx: Context,
+  ref: ServerRef,
+  persistKey: (apiKey: string) => void = () => {},
+): void {
   ctx.inject(['webServer'], (wsCtx: Context) => {
     wsCtx.effect(() => {
       const webServer = wsCtx.get('webServer', false) as WebServerLike | undefined
@@ -148,6 +156,24 @@ export function registerA2aRoutes(ctx: Context, ref: ServerRef): void {
           path: '/api/a2a/serverInfo',
           handler: (_req, res) => {
             send(res, 200, serverInfoOf(ref))
+          },
+        }),
+      )
+
+      disposers.push(
+        webServer.register({
+          kind: 'exact',
+          path: '/api/a2a/regenerateKey',
+          handler: (_req, res) => {
+            const server = ref.server
+            if (server === undefined) {
+              send(res, 400, { error: 'A2A endpoint is disabled' })
+              return
+            }
+            const apiKey = randomBytes(32).toString('base64url')
+            server.apiKey = apiKey
+            persistKey(apiKey)
+            send(res, 200, { ok: true, apiKey })
           },
         }),
       )
