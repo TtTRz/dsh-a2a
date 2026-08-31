@@ -445,6 +445,55 @@ describe('A2A server with a harness executor', () => {
     expect(creates[0]?.meta).toMatchObject({ agentPreset: 'standard' })
   })
 
+  it('mints a session dir with no double dash for a UUID-style contextId', async () => {
+    const agents = new Map<string, FakeAgent>()
+    const ctx = fakeCtx(agents)
+    const creates: Array<{ meta?: { cwd?: string } }> = []
+    ;(
+      ctx as unknown as {
+        agents: {
+          create: (options: { meta?: { cwd?: string } }) => Promise<{
+            agent: FakeAgent
+            dispose: () => Promise<void>
+          }>
+        }
+      }
+    ).agents.create = async (options) => {
+      creates.push(options)
+      const agent = new FakeAgent()
+      return { agent, dispose: async () => undefined }
+    }
+    const executor = new DshAgentExecutor(ctx, {
+      agentId: 'test',
+      preset: 'standard',
+      turnTimeoutMs: 10_000,
+      cwd: '/tmp/a2a-ws-test',
+      workspaceTitle: 'A2A',
+    })
+    const { bus } = collectingBus()
+    // A UUID whose 24-char slug cut lands on a hyphen: the old slice produced
+    // `A2A-...-<MMDD>` with a `--` (issue). The slug must not end on a dash.
+    await executor.execute(
+      {
+        taskId: 'task-uuid',
+        contextId: 'a3f19c2e-8d4b-4f0a-9c1e-2b7d5e6f8a90',
+        context: {},
+        userMessage: userMessage('hi'),
+        request: {
+          tenant: '',
+          message: userMessage('hi'),
+          configuration: undefined,
+          metadata: undefined,
+        },
+      } as never,
+      bus,
+    )
+    const dir = creates[0]?.meta?.cwd?.split('/').pop() ?? ''
+    expect(dir.startsWith('A2A-')).toBe(true)
+    expect(dir).not.toContain('--')
+    expect(dir).toMatch(/^A2A-[A-Za-z0-9_-]+-[0-9]{4}-[0-9]{6}-[0-9a-f]{6}$/)
+  })
+
   it('validates the A2A workspace defaults and the provider/model pair', () => {
     const defaults = resolveConfig({ server: { host: '127.0.0.1' } })
     expect(defaults.server.workspaceTitle).toBe('A2A')
