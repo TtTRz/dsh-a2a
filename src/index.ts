@@ -19,10 +19,11 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { type Config as PluginConfig, resolveConfig } from './config.js'
 import { DshAgentExecutor } from './executor.js'
+import { registerA2aRoutes } from './routes.js'
 import { A2aServer } from './server.js'
 import { attachSettings } from './settings.js'
 import { A2aRegistry, a2aTools } from './tools.js'
-import { A2aTestService, type ServerRef } from './typert.js'
+import type { ServerRef } from './typert.js'
 
 export const name = 'dsh-a2a'
 export const inject = ['agents', 'tools', 'attachments']
@@ -39,11 +40,11 @@ export type {
 } from './config.js'
 export { Config, normalizeAgents, resolveConfig } from './config.js'
 export { collectReplyText, DshAgentExecutor, sessionIdFor, textOf } from './executor.js'
+export { registerA2aRoutes } from './routes.js'
 export { A2aServer, type A2aServerOptions, buildAgentCard, type RequestObserver } from './server.js'
 export { A2aSettings, attachSettings, SETTINGS_NAMESPACE } from './settings.js'
 export { A2aRegistry, type A2aToolOptions, a2aTools } from './tools.js'
 export {
-  A2aTestService,
   type AgentCardProbe,
   type ServerInfo,
   type ServerRef,
@@ -54,7 +55,7 @@ export {
 export function apply(ctx: Context, config: PluginConfig): void {
   const resolved = resolveConfig(config)
   const primaryCard = resolved.server.agents[0]
-  // Host-side Remote surface for the settings tab (agent-card probe + server
+  // Host-side HTTP routes for the settings tab (agent-card probe + server
   // summary). Reads through a mutable ref so settings-sourced Agent Card
   // overrides show up in serverInfo without a restart.
   const serverRef: ServerRef = {
@@ -64,7 +65,7 @@ export function apply(ctx: Context, config: PluginConfig): void {
       description: primaryCard?.description ?? resolved.server.agentCard.description,
     },
   }
-  new A2aTestService(ctx, serverRef)
+  registerA2aRoutes(ctx, serverRef)
   let server: A2aServer | undefined
   const executors = resolved.server.agents.map((agent) => ({
     agent,

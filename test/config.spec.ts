@@ -10,6 +10,7 @@ describe('resolveConfig', () => {
       port: 8899,
       preset: 'standard',
       turnTimeoutMs: 300_000,
+      callTimeoutMs: 300_000,
       agentCard: { name: 'dsh-a2a' },
     })
     expect(resolved.agents).toEqual([])
@@ -19,6 +20,7 @@ describe('resolveConfig', () => {
     expect(() => resolveConfig({ server: { port: 0 } })).toThrow(/server.port/)
     expect(() => resolveConfig({ server: { port: 70_000 } })).toThrow(/server.port/)
     expect(() => resolveConfig({ server: { turnTimeoutMs: 0 } })).toThrow(/turnTimeoutMs/)
+    expect(() => resolveConfig({ server: { callTimeoutMs: 0 } })).toThrow(/callTimeoutMs/)
   })
 
   it('rejects malformed registry entries', () => {

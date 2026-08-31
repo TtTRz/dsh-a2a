@@ -6,7 +6,7 @@
  * The tab owns two panels:
  * - **inbound** — a read-only summary of the local A2A endpoint (listen
  *   address, public URL, auth state, model route, Agent Card identity),
- *   projected by the Host through the `a2a.serverInfo` Remote; the apiKey
+ *   projected by the Host through the `/api/a2a/serverInfo` route; the apiKey
  *   itself never crosses the wire.
  * - **outbound** — the `agents` registry editor over the `a2a` settings
  *   namespace: staged rows (name / URL / description / structured headers),
@@ -37,17 +37,16 @@ import {
   rowsFromAgents,
   type StoredAgent,
 } from './card-state.js'
-import { TYPERT_REMOTE } from './typert-client.js'
+import { fetchServerInfo, probeCard, type ServerInfoValue } from './client-api.js'
 
 /** The settings namespace this card claims; must match the Host registration. */
 const NAMESPACE = 'a2a'
 
 export const name = 'dsh-a2a-client'
-// NOTE: `remote.a2a` must NOT be declared here — that namespace service is
-// created by this very plugin's `$mount(TYPERT_REMOTE)` inside apply(), so a
-// static inject would park the fiber waiting on itself forever (client boot:
-// "pending (waiting for service: remote.a2a)"). The card reads it lazily.
-export const inject = ['slots', 'settingsScope', 'remote']
+// The settings tab reads the Host through plain `fetch` (client-api.js), not a
+// Typert Remote surface, so no `remote` inject is needed and no namespace
+// service mount can park the fiber waiting on itself.
+export const inject = ['slots', 'settingsScope']
 
 /** The slice of the client settings scope contract this tab consumes. */
 interface ScopeLike {
@@ -74,36 +73,6 @@ interface SlotsSurface {
     options: { name: string; id?: string; order?: number; label?: string; key?: string },
     render: () => ReactNode,
   ): unknown
-}
-
-/** The slice of the client Remote surface this tab consumes. */
-interface RemoteLike {
-  a2a?: {
-    testAgentCard(
-      url: string,
-      headers: Record<string, string>,
-    ): Promise<{
-      ok: boolean
-      value?: { name?: string; description?: string }
-      error?: { code?: string; message?: string }
-    }>
-    serverInfo(): Promise<{
-      ok: boolean
-      value?: {
-        enabled: boolean
-        host: string
-        port: number
-        publicUrl?: string
-        apiKeySet: boolean
-        provider?: string
-        model?: string
-        preset: string
-        workspaceTitle: string
-        agentCard: { name: string; description: string; version: string }
-      }
-      error?: { code?: string; message?: string }
-    }>
-  }
 }
 
 type Dictionary = Record<string, string>
@@ -316,9 +285,9 @@ const cssVars = {
   brand: 'var(--dsw-alias-state-business-primary, #3370ff)',
 }
 
-function A2aCard(props: { scope: ScopeLike; remote?: RemoteLike }): ReactNode {
+function A2aCard(props: { scope: ScopeLike }): ReactNode {
   const t = useCopy()
-  const { scope, remote } = props
+  const { scope } = props
   const snapshot = useSyncExternalStore(
     (listener) => scope.subscribe(listener),
     () => scope.getSnapshot(),
@@ -412,20 +381,12 @@ function A2aCard(props: { scope: ScopeLike; remote?: RemoteLike }): ReactNode {
       return next
     })
   }, [])
-  // Stable across renders on purpose (remote/t are stable): the seed effect
-  // depends on it, so a probe landing must NOT re-trigger re-seeding.
+  // The Host backs the probe with a plain fetch (client-api.js); no lazy
+  // Remote-mount gate exists anymore, so a probe always runs against the route.
   const runProbe = useCallback(
-    async (row: DraftRow, silent: boolean): Promise<void> => {
+    async (row: DraftRow): Promise<void> => {
       const url = row.url.trim()
       if (url.length === 0 || inflight.current.has(row.id)) return
-      if (remote?.a2a === undefined) {
-        // Auto-probes skip quietly while the Remote surface is still mounting;
-        // a manual test reports the unavailability instead.
-        if (!silent) {
-          setProbe(row.id, { status: 'failed', url, message: t.remoteUnavailable })
-        }
-        return
-      }
       inflight.current.add(row.id)
       setProbe(row.id, { status: 'testing', url })
       try {
@@ -434,9 +395,7 @@ function A2aCard(props: { scope: ScopeLike; remote?: RemoteLike }): ReactNode {
           const key = pair.key.trim()
           if (key.length > 0) headers[key] = pair.value
         }
-        const result = await remote.a2a.testAgentCard(url, headers)
-        if (!result.ok) throw new Error(result.error?.message ?? t.testFailed)
-        const card = result.value ?? {}
+        const card = await probeCard(url, headers)
         setProbe(row.id, {
           status: 'ok',
           url,
@@ -453,7 +412,7 @@ function A2aCard(props: { scope: ScopeLike; remote?: RemoteLike }): ReactNode {
         inflight.current.delete(row.id)
       }
     },
-    [remote, t, setProbe],
+    [setProbe],
   )
   const adopt = (row: DraftRow, probe: RowProbe): void => {
     if (probe.remoteName !== undefined) edit(row.id, { name: probe.remoteName })
@@ -479,7 +438,7 @@ function A2aCard(props: { scope: ScopeLike; remote?: RemoteLike }): ReactNode {
     // Auto-verify persisted rows so the tab opens with remote info already
     // shown and verified states established; failures just surface in-row.
     for (const row of next) {
-      if (row.url.trim().length > 0) void runProbe(row, true)
+      if (row.url.trim().length > 0) void runProbe(row)
     }
   }, [stored, runProbe])
   const discard = (): void => {
@@ -726,7 +685,7 @@ function A2aCard(props: { scope: ScopeLike; remote?: RemoteLike }): ReactNode {
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => void runProbe(row, false)}
+                    onClick={() => void runProbe(row)}
                     disabled={disabled || probe?.status === 'testing'}
                   >
                     {probe?.status === 'testing' ? t.testing : t.test}
@@ -832,7 +791,7 @@ function A2aCard(props: { scope: ScopeLike; remote?: RemoteLike }): ReactNode {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => void runProbe(row, false)}
+                onClick={() => void runProbe(row)}
                 disabled={disabled || probes.get(row.id)?.status === 'testing'}
               >
                 {probes.get(row.id)?.status === 'testing' ? t.testing : t.test}
@@ -1075,24 +1034,10 @@ function A2aCard(props: { scope: ScopeLike; remote?: RemoteLike }): ReactNode {
   )
 }
 
-/** The read-only inbound summary the Host projects (secrets reduced to booleans). */
-interface ServerInfoValue {
-  enabled: boolean
-  host: string
-  port: number
-  publicUrl?: string
-  apiKeySet: boolean
-  provider?: string
-  model?: string
-  preset: string
-  workspaceTitle: string
-  agentCard: { name: string; description: string; version: string }
-}
-
 /** Inbound panel: how this harness presents itself as an A2A agent. */
-function ServerInfoPanel(props: { remote: RemoteLike; scope: ScopeLike }): ReactNode {
+function ServerInfoPanel(props: { scope: ScopeLike }): ReactNode {
   const t = useCopy()
-  const { remote, scope } = props
+  const { scope } = props
   const snapshot = useSyncExternalStore(
     (listener) => scope.subscribe(listener),
     () => scope.getSnapshot(),
@@ -1108,19 +1053,15 @@ function ServerInfoPanel(props: { remote: RemoteLike; scope: ScopeLike }): React
   const [editingIdentity, setEditingIdentity] = useState(false)
   const refreshServerInfo = useCallback(async (): Promise<void> => {
     try {
-      const result = await remote.a2a?.serverInfo()
-      if (result === undefined || !result.ok) {
-        setFailed(true)
-        return
-      }
-      setInfo(result.value ?? null)
+      const value = await fetchServerInfo()
+      setInfo(value)
     } catch {
       setFailed(true)
     } finally {
       setLoading(false)
     }
-  }, [remote])
-  // biome-ignore lint/correctness/useExhaustiveDependencies: one-shot load on mount; the refresh button is the reload path and remote.a2a is a stable lazily-resolved facade.
+  }, [])
+  // biome-ignore lint/correctness/useExhaustiveDependencies: one-shot load on mount; the refresh button is the reload path.
   useEffect(() => {
     setLoading(true)
     setFailed(false)
@@ -1575,7 +1516,7 @@ function TutorialPopover(props: { cardUrl?: string }): ReactNode {
 }
 
 /** The whole A2A settings tab: inbound summary on top, outbound registry below. */
-function A2aSection(props: { scope: ScopeLike; remote: RemoteLike }): ReactNode {
+function A2aSection(props: { scope: ScopeLike }): ReactNode {
   const t = useCopy()
   return (
     <section
@@ -1593,7 +1534,7 @@ function A2aSection(props: { scope: ScopeLike; remote: RemoteLike }): ReactNode 
         </h2>
         <p style={{ margin: 0, fontSize: '13px', color: cssVars.labelTertiary }}>{t.tabIntro}</p>
       </header>
-      <ServerInfoPanel remote={props.remote} scope={props.scope} />
+      <ServerInfoPanel scope={props.scope} />
       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
           <h3 style={{ margin: 0, fontSize: '14px', fontWeight: 600, color: cssVars.labelPrimary }}>
@@ -1603,7 +1544,7 @@ function A2aSection(props: { scope: ScopeLike; remote: RemoteLike }): ReactNode 
             {t.description}
           </p>
         </div>
-        <A2aCard scope={props.scope} remote={props.remote} />
+        <A2aCard scope={props.scope} />
       </div>
     </section>
   )
@@ -1613,8 +1554,6 @@ function A2aSection(props: { scope: ScopeLike; remote: RemoteLike }): ReactNode 
 export function apply(ctx: unknown): void {
   const c = ctx as {
     get(service: string): unknown
-    effect(fn: () => () => void, tag?: string): unknown
-    remote: RemoteLike & { $mount(contribution: unknown): Promise<() => void> }
   }
   const slots = c.get('slots') as SlotsSurface | undefined
   const binder = c.get('settingsScope') as
@@ -1622,25 +1561,9 @@ export function apply(ctx: unknown): void {
     | undefined
   if (slots === undefined || binder === undefined) return
   const scope = binder.bind({ namespace: NAMESPACE })
-  const remote = c.remote
-  c.effect(() => {
-    const state = { dispose: (): void => {} }
-    void remote.$mount(TYPERT_REMOTE).then((d) => {
-      state.dispose = d
-    })
-    return () => state.dispose()
-  })
-  // `remote.a2a` only exists once the $mount above lands, and property access
-  // on the traced Remote facade throws without a static inject — so the card
-  // receives a facade that resolves the namespace lazily at click time.
-  const cardRemote: RemoteLike = {
-    get a2a() {
-      return c.get('remote.a2a') as RemoteLike['a2a']
-    },
-  }
   slots.inject('settings.section', () =>
     slots.register({ name: 'settings.section', id: 'a2a', order: 900, label: 'A2A' }, () => (
-      <A2aSection scope={scope} remote={cardRemote} />
+      <A2aSection scope={scope} />
     )),
   )
 }
