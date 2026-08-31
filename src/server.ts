@@ -106,7 +106,16 @@ export function buildAgentCard(
       config.apiKey === undefined ? [] : [{ schemes: { bearer: { list: [] } } }],
     defaultInputModes: ['text'],
     defaultOutputModes: ['text'],
-    skills: [],
+    skills: (agent?.skills ?? []).map((skill) => ({
+      id: skill.id,
+      name: skill.name,
+      description: skill.description,
+      tags: [],
+      examples: [],
+      inputModes: ['text'],
+      outputModes: ['text'],
+      securityRequirements: config.apiKey === undefined ? [] : [],
+    })),
     documentationUrl: '',
     signatures: [],
   }

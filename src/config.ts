@@ -84,6 +84,18 @@ export interface AgentSpec {
   cwd?: string
   /** Sidebar workspace title grouping this agent's conversations. */
   workspaceTitle?: string
+  /** The abilities advertised on the Agent Card (A2A `skills`). */
+  skills?: AgentSkillSpec[]
+}
+
+/** One advertised ability on an Agent Card (the config stores only these). */
+export interface AgentSkillSpec {
+  /** Stable skill id, e.g. `query-gray-release`. */
+  id: string
+  /** Human-readable name, e.g. `查询灰度版本`. */
+  name: string
+  /** Detailed description of the ability. */
+  description: string
 }
 
 export interface Config {
@@ -112,6 +124,15 @@ export const Config: z<Config> = z.object({
           model: z.string(),
           cwd: z.string(),
           workspaceTitle: z.string(),
+          skills: z
+            .array(
+              z.object({
+                id: z.string(),
+                name: z.string(),
+                description: z.string(),
+              }),
+            )
+            .default([]),
         }),
       )
       .default([]),
@@ -152,6 +173,8 @@ export interface ResolvedAgentSpec {
   model?: string
   cwd: string
   workspaceTitle: string
+  /** Abilities advertised on the Agent Card (A2A `skills`). */
+  skills?: AgentSkillSpec[]
 }
 
 export interface ResolvedServer {
@@ -235,6 +258,10 @@ export function normalizeServerAgent(
     cwd,
     workspaceTitle:
       (row.workspaceTitle ?? '').trim() || known?.workspaceTitle || defaults.workspaceTitle,
+    skills:
+      Array.isArray(row.skills) && row.skills.length > 0
+        ? row.skills.map((skill) => ({ id: skill.id, name: skill.name, description: skill.description }))
+        : known?.skills ?? [],
   }
 }
 
@@ -340,6 +367,11 @@ function resolveServerAgents(
       )
     }
     const card = server.agentCard ?? {}
+    const skills = (agent.skills ?? []).map((skill) => ({
+      id: skill.id,
+      name: skill.name,
+      description: skill.description,
+    }))
     return {
       id,
       name,
@@ -353,6 +385,7 @@ function resolveServerAgents(
       model: model ?? defaults.model,
       cwd,
       workspaceTitle: agent.workspaceTitle?.trim() || defaults.workspaceTitle,
+      skills,
     }
   })
   if (specs.length === 0) {

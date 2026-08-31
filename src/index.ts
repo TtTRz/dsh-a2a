@@ -32,6 +32,7 @@ export { callAgent, DEFAULT_CALL_TIMEOUT_MS, resolveHeaders, textOfResult } from
 export type {
   AgentCardOptions,
   AgentEntry,
+  AgentSkillSpec,
   Config as A2aConfig,
   ResolvedAgentEntry,
   ResolvedAgentSpec,
