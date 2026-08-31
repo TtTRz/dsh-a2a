@@ -1598,7 +1598,7 @@ function ServerInfoPanel(props: { scope: ScopeLike }): ReactNode {
                           <input
                             style={inputStyle2}
                             value={row.id}
-                            placeholder="例如 mp-perf"
+                            placeholder="例如 docs"
                             onChange={(event) => editIdentityRow(index, { id: event.target.value })}
                           />
                           <span style={{ fontSize: '11px', color: cssVars.labelTertiary }}>

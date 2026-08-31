@@ -73,10 +73,10 @@ export interface AgentEntry {
  * One LOCAL agent this A2A server serves at `/agents/<id>`. Each has its own
  * preset (tools + persona), its own Agent Card identity, and its own session
  * namespace, so one server can expose several presets — the A2A equivalent of
- * running several WeCom bots.
+ * running several bots.
  */
 export interface AgentSpec {
-  /** URL path slug under `/agents/` (e.g. `mp-perf`); must be URL-safe. */
+  /** URL path slug under `/agents/` (e.g. `docs`); must be URL-safe. */
   id: string
   /** Agent Card name. */
   name: string
@@ -96,9 +96,9 @@ export interface AgentSpec {
 
 /** One advertised ability on an Agent Card (the config stores only these). */
 export interface AgentSkillSpec {
-  /** Stable skill id, e.g. `query-gray-release`. */
+  /** Stable skill id, e.g. `query-orders`. */
   id: string
-  /** Human-readable name, e.g. `查询灰度版本`. */
+  /** Human-readable name, e.g. `查询订单`. */
   name: string
   /** Detailed description of the ability. */
   description: string
@@ -234,7 +234,7 @@ export function normalizeServerAgent(
   const id = (row.id ?? '').trim()
   if (id.length === 0 || !/^[a-z0-9][a-z0-9_-]*$/.test(id)) {
     throw new Error(
-      `dsh-a2a: ${label}.id must be a URL-safe slug (e.g. mp-perf), got ${JSON.stringify(row.id)}`,
+      `dsh-a2a: ${label}.id must be a URL-safe slug (e.g. docs), got ${JSON.stringify(row.id)}`,
     )
   }
   const known = base.get(id)
@@ -361,7 +361,7 @@ function resolveServerAgents(
     const id = (agent.id ?? '').trim()
     if (id.length === 0 || !/^[a-z0-9][a-z0-9_-]*$/.test(id)) {
       throw new Error(
-        `dsh-a2a: ${label}.id must be a URL-safe slug (e.g. mp-perf), got ${JSON.stringify(agent.id)}`,
+        `dsh-a2a: ${label}.id must be a URL-safe slug (e.g. docs), got ${JSON.stringify(agent.id)}`,
       )
     }
     const name = (agent.name ?? '').trim()

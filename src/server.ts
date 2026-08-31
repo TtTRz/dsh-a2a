@@ -137,7 +137,7 @@ interface AgentRoute {
   id: string
   card: AgentCard
   handler: DefaultRequestHandler
-  /** URL-safe base path, e.g. `/agents/mp-perf`. */
+  /** URL-safe base path, e.g. `/agents/docs`. */
   basePath: string
   /** The spec that produced this route (for live reconcile comparison). */
   spec: ResolvedAgentSpec

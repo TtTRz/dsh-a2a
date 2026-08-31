@@ -95,7 +95,7 @@ By default every conversation uses the deployment's route: the configured `serve
 curl -s http://127.0.0.1:8899/ -H 'Content-Type: application/json' \
   -d '{"jsonrpc":"2.0","id":1,"method":"SendMessage","params":{
         "message":{"role":"user","messageId":"m1","parts":[{"kind":"text","text":"hi"}],"contextId":"demo"},
-        "metadata":{"agentPreset":"code","model":"deepseek-v4-pro"}
+        "metadata":{"agentPreset":"general","model":"model-a"}
       }}'
 ```
 
@@ -150,7 +150,7 @@ dsh assemblies are layered: **the bundle's own patch (npm-distributed) → the p
 A2A_PUBLIC_URL=https://gateway.example.com/
 A2A_API_KEY=<secret>
 A2A_PROVIDER=venus
-A2A_MODEL=deepseek-v4-flash-official
+A2A_MODEL=model-b
 ```
 
 Patch-layer changes are read at assembly time — restart `dsh web` to apply them. The GUI registry (`agents`) is the exception: saves hot-reload.

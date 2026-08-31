@@ -204,20 +204,20 @@ describe('requestOverrides', () => {
   })
 
   it('reads the preset from either key', () => {
-    expect(requestOverrides(params({ agentPreset: 'graphrag' }), message({}))).toEqual({
-      preset: 'graphrag',
+    expect(requestOverrides(params({ agentPreset: 'preset-a' }), message({}))).toEqual({
+      preset: 'preset-a',
     })
-    expect(requestOverrides(params({ preset: 'graphrag' }), message({}))).toEqual({
-      preset: 'graphrag',
+    expect(requestOverrides(params({ preset: 'preset-a' }), message({}))).toEqual({
+      preset: 'preset-a',
     })
   })
 
   it('reads the model route from either map', () => {
     expect(
-      requestOverrides(params({}), message({ model: 'deepseek-v4-pro', provider: 'bai' })),
-    ).toEqual({ model: 'deepseek-v4-pro', provider: 'bai' })
-    expect(requestOverrides(params({ model: 'deepseek-v4-pro' }), message({}))).toEqual({
-      model: 'deepseek-v4-pro',
+      requestOverrides(params({}), message({ model: 'model-a', provider: 'provider-a' })),
+    ).toEqual({ model: 'model-a', provider: 'provider-a' })
+    expect(requestOverrides(params({ model: 'model-a' }), message({}))).toEqual({
+      model: 'model-a',
     })
   })
 
@@ -246,18 +246,18 @@ describe('requestOverrides', () => {
 describe('per-request overrides in the executor', () => {
   it('creates the agent with the preset and model the request named', async () => {
     const { creates, executor } = harness()
-    await send(executor, 'ctx-1', { agentPreset: 'graphrag', model: 'deepseek-v4-pro' })
+    await send(executor, 'ctx-1', { agentPreset: 'preset-a', model: 'model-a' })
     // A bare model pairs with the route's provider: callers name the model
     // they want, not the route serving it.
     expect(creates[0]?.agentOptions).toEqual({
       provider: 'cfg-provider',
-      model: 'deepseek-v4-pro',
+      model: 'model-a',
     })
-    expect(creates[0]?.meta.agentPreset).toBe('graphrag')
+    expect(creates[0]?.meta.agentPreset).toBe('preset-a')
   })
 
   it('honours a full route override and the configured preset when none is named', async () => {
-    const { creates, executor } = harness({ provider: 'bai', model: 'deepseek-v4-flash' })
+    const { creates, executor } = harness({ provider: 'provider-a', model: 'model-b' })
     await send(executor, 'ctx-1', { provider: 'venus', model: 'other-model' })
     expect(creates[0]?.agentOptions).toEqual({ provider: 'venus', model: 'other-model' })
     expect(creates[0]?.meta.agentPreset).toBe('standard')
@@ -267,29 +267,29 @@ describe('per-request overrides in the executor', () => {
     const { creates, executor } = harness()
     await send(executor, 'ctx-1')
     expect(installed[0]?.current).toEqual(ROUTE)
-    await send(executor, 'ctx-1', { model: 'deepseek-v4-pro' })
+    await send(executor, 'ctx-1', { model: 'model-a' })
     // One install proves the session was reused, and the mutated ref proves
     // the switch: the agent is never recreated for a model change.
     expect(creates).toHaveLength(1)
     expect(installed).toHaveLength(1)
-    expect(installed[0]?.current).toEqual({ provider: 'cfg-provider', model: 'deepseek-v4-pro' })
+    expect(installed[0]?.current).toEqual({ provider: 'cfg-provider', model: 'model-a' })
   })
 
   it('keeps the overridden route for turns that name no model', async () => {
     const { executor } = harness()
-    await send(executor, 'ctx-1', { model: 'deepseek-v4-pro' })
+    await send(executor, 'ctx-1', { model: 'model-a' })
     await send(executor, 'ctx-1')
-    expect(installed[0]?.current).toEqual({ provider: 'cfg-provider', model: 'deepseek-v4-pro' })
+    expect(installed[0]?.current).toEqual({ provider: 'cfg-provider', model: 'model-a' })
   })
 
   it('ignores a preset override once the session exists, and says so', async () => {
     const { creates, executor } = harness()
-    await send(executor, 'ctx-1', { agentPreset: 'graphrag' })
+    await send(executor, 'ctx-1', { agentPreset: 'preset-a' })
     await send(executor, 'ctx-1', { agentPreset: 'myshcode' })
     // A preset composes an agent, so swapping it mid-conversation would leave
     // tool calls the new composition cannot make.
     expect(creates).toHaveLength(1)
-    expect(creates[0]?.meta.agentPreset).toBe('graphrag')
+    expect(creates[0]?.meta.agentPreset).toBe('preset-a')
     expect(warns.join('\n')).toMatch(/preset override "myshcode" ignored/)
   })
 
@@ -297,37 +297,37 @@ describe('per-request overrides in the executor', () => {
     const { executor } = harness({
       resolvePreset: async () => {
         const error = new Error('no preset named "code"') as Error & { available?: string[] }
-        error.available = ['graphrag', 'myshcode']
+        error.available = ['preset-a', 'myshcode']
         throw error
       },
     })
     await send(executor, 'ctx-1', { agentPreset: 'code' })
     expect(replies().join('\n')).toMatch(
-      /cannot mount preset "code".*available: graphrag, myshcode/s,
+      /cannot mount preset "code".*available: preset-a, myshcode/s,
     )
   })
 
   it('drops overrides when the deployment refuses them', async () => {
     const { creates, executor } = harness({ allowOverrides: false })
-    await send(executor, 'ctx-1', { agentPreset: 'graphrag', model: 'deepseek-v4-pro' })
+    await send(executor, 'ctx-1', { agentPreset: 'preset-a', model: 'model-a' })
     expect(creates[0]?.agentOptions).toEqual(ROUTE)
     expect(creates[0]?.meta.agentPreset).toBe('standard')
     expect(warns.join('\n')).toMatch(/allowOverrides is false/)
   })
 
   it('leaves a request that names no override exactly as before', async () => {
-    const { creates, executor } = harness({ provider: 'bai', model: 'deepseek-v4-flash' })
+    const { creates, executor } = harness({ provider: 'provider-a', model: 'model-b' })
     await send(executor, 'ctx-1')
-    expect(creates[0]?.agentOptions).toEqual({ provider: 'bai', model: 'deepseek-v4-flash' })
+    expect(creates[0]?.agentOptions).toEqual({ provider: 'provider-a', model: 'model-b' })
     expect(creates[0]?.meta.agentPreset).toBe('standard')
     expect(warns).toEqual([])
   })
 
   it('pairs a bare model override with the configured provider', async () => {
     const { creates, executor } = harness()
-    await send(executor, 'ctx-bare', { model: 'deepseek-pro' })
+    await send(executor, 'ctx-bare', { model: 'model-a' })
     // No provider named, so the configured default provider completes the pair.
-    expect(creates[0]?.agentOptions).toEqual({ provider: 'cfg-provider', model: 'deepseek-pro' })
+    expect(creates[0]?.agentOptions).toEqual({ provider: 'cfg-provider', model: 'model-a' })
   })
 
   it('falls back instead of failing when a bare model has no provider to pair with', async () => {
@@ -343,7 +343,7 @@ describe('per-request overrides in the executor', () => {
       turnTimeoutMs: 10_000,
       cwd: SESSION_ROOT,
     })
-    await send(bare, 'ctx-2', { model: 'deepseek-v4-pro' })
+    await send(bare, 'ctx-2', { model: 'model-a' })
     // The deployment has no route at all, so the task still cannot run — but
     // the failure is the deployment's "no model route", not an override error.
     expect(replies().join('\n')).toMatch(/no model route/)
