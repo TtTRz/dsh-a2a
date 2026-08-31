@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-08-30
+
+### Added
+
+- Callers can now pick the preset and the model route per request through the
+  A2A `metadata` map, instead of always using the deployment's route. Three
+  keys are read from `params.metadata` and `params.message.metadata` (the
+  message-level map wins): `agentPreset` (alias `preset`), `model`, and
+  `provider`. The two ride different lifetimes because the harness gives them
+  different ones — a preset composes an agent, so it applies on the request
+  that creates the session and is ignored (logged) on later turns, swapping
+  tools mid-conversation would leave tool calls the new composition cannot
+  make; the model is a per-step route, so a live session is switched onto it
+  without losing the conversation. A bare `model` pairs with
+  `server.provider`, falling back to the harness default model's provider.
+- `server.allowOverrides` (default `true`) locks the deployment's route when
+  set to `false`: request overrides are then dropped and logged, and the
+  request is still answered on the configured route. The settings panel shows
+  whether overrides are honored.
+
+### Changed
+
+- A malformed override (a non-string, or a value that could escape the preset
+  root) now fails the task naming the offending key, rather than being
+  silently ignored; an unknown preset fails listing the ids this deployment
+  does supply. Routing a turn to a preset or model the caller did not ask for
+  — because its value did not parse — is the one outcome a caller cannot
+  detect.
+
 ## [0.5.0] - 2026-08-24
 
 ### Added
