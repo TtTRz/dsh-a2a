@@ -22,6 +22,8 @@ export interface ServerInfoValue {
   port: number
   publicUrl?: string
   apiKeySet: boolean
+  /** The endpoint Bearer key (surfaced for operators; the UI masks it). */
+  apiKey?: string
   provider?: string
   model?: string
   preset: string
@@ -31,6 +33,7 @@ export interface ServerInfoValue {
 
 const TEST_CARD = '/api/a2a/testAgentCard'
 const SERVER_INFO = '/api/a2a/serverInfo'
+const REGENERATE_KEY = '/api/a2a/regenerateKey'
 
 interface ErrorPayload {
   error?: string
@@ -57,4 +60,17 @@ export async function fetchServerInfo(): Promise<ServerInfoValue> {
   const payload = (await response.json()) as ServerInfoValue
   if (payload === null || typeof payload !== 'object') throw new Error('invalid payload')
   return payload
+}
+
+/** Rotate the endpoint Bearer key through the Host route; resolves the new key. */
+export async function regenerateKey(): Promise<string> {
+  const response = await fetch(REGENERATE_KEY, {
+    method: 'POST',
+    headers: { accept: 'application/json' },
+  })
+  const payload = (await response.json()) as { ok?: true; apiKey?: string } & ErrorPayload
+  if (!response.ok || payload.apiKey === undefined) {
+    throw new Error(payload.error ?? `HTTP ${String(response.status)}`)
+  }
+  return payload.apiKey
 }
