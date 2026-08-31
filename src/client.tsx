@@ -220,7 +220,7 @@ const COPY: { zh: Dictionary; en: Dictionary } = {
     identityReset: '重置为部署默认',
     tutorialTitle: '使用教程',
     tutorialStep1:
-      '调用本机 agent：把下面的地址交给对方 A2A 客户端即可发现并调用本 agent（浏览器打开可查看身份卡片）。',
+      '调用本机 agent：把上方对应 agent 卡片显示的地址交给对方 A2A 客户端即可发现并调用本 agent（浏览器打开可查看身份卡片）。',
     tutorialStep2:
       '添加远程 agent：在出口区域「添加 agent」→ 填 Agent Card URL → 点「测试 agent-card」→ 测试成功后可「采用」远端声明的名称与描述 → 保存（未测试成功的行不能保存）。',
     // biome-ignore lint/suspicious/noTemplateCurlyInString: copy documents the ${ENV_VAR} header syntax
@@ -319,7 +319,7 @@ const COPY: { zh: Dictionary; en: Dictionary } = {
     identityReset: 'Reset to deployment default',
     tutorialTitle: 'How to use',
     tutorialStep1:
-      'Call this agent: hand the address below to any A2A client to discover and call it (open it in a browser to inspect the card).',
+      'Call this agent: hand the address on the matching agent card above to any A2A client to discover and call it (open it in a browser to inspect the card).',
     tutorialStep2:
       'Add a remote agent: in Outbound, "Add agent" → paste its Agent Card URL → "Test agent card" → once it passes you can "Adopt" the advertised name/description → Save (rows that never passed a test cannot be saved).',
     // biome-ignore lint/suspicious/noTemplateCurlyInString: copy documents the ${ENV_VAR} header syntax
@@ -1211,9 +1211,6 @@ function ServerInfoPanel(props: { scope: ScopeLike }): ReactNode {
     ? (info.publicUrl ?? `http://${info.host}:${String(info.port)}/`)
     : undefined
   const withSlash = (url: string): string => (url.endsWith('/') ? url : `${url}/`)
-  /** The single root discovery card (first agent's card). */
-  const rootCardUrl =
-    baseUrl === undefined ? undefined : `${withSlash(baseUrl)}.well-known/agent-card.json`
   /** One served agent's own card address at `/agents/<id>`. */
   const agentCardUrl = (id: string | undefined): string | undefined =>
     baseUrl === undefined || id === undefined || id.length === 0
@@ -1247,7 +1244,6 @@ function ServerInfoPanel(props: { scope: ScopeLike }): ReactNode {
       setRefreshingToken(false)
     }
   }
-  const tutorialUrl = agentCardUrl(serverAgents[0]?.id) ?? rootCardUrl
   const overridden =
     snapshot.user !== undefined &&
     snapshot.user !== null &&
@@ -1302,7 +1298,7 @@ function ServerInfoPanel(props: { scope: ScopeLike }): ReactNode {
           {t.inboundTitle}
         </h3>
         <span style={{ flex: '1' }} />
-        <TutorialPopover cardUrl={tutorialUrl} />
+        <TutorialPopover />
         <Button
           variant="ghost"
           size="sm"
@@ -1674,9 +1670,8 @@ function ServerInfoPanel(props: { scope: ScopeLike }): ReactNode {
 }
 
 /** Hover-pop how-to, anchored to a question icon in the inbound header. */
-function TutorialPopover(props: { cardUrl?: string }): ReactNode {
+function TutorialPopover(): ReactNode {
   const t = useCopy()
-  const { cardUrl } = props
   const [open, setOpen] = useState(false)
   const step = (text: string): ReactNode => (
     <li style={{ margin: 0, fontSize: '12px', lineHeight: 1.6, color: cssVars.labelSecondary }}>
@@ -1744,20 +1739,6 @@ function TutorialPopover(props: { cardUrl?: string }): ReactNode {
             {step(t.tutorialStep2)}
             {step(t.tutorialStep3)}
           </ol>
-          {cardUrl !== undefined ? (
-            <code
-              style={{
-                fontSize: '11px',
-                color: cssVars.labelSecondary,
-                background: cssVars.bgLayer2,
-                borderRadius: '6px',
-                padding: '4px 8px',
-                wordBreak: 'break-all',
-              }}
-            >
-              {cardUrl}
-            </code>
-          ) : null}
         </div>
       ) : null}
     </div>
