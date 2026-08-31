@@ -179,6 +179,9 @@ const COPY: { zh: Dictionary; en: Dictionary } = {
     inboundModel: '模型路由',
     inboundModelDefault: '跟随 harness 默认模型',
     inboundPreset: 'Preset',
+    inboundOverrides: '请求可覆盖',
+    inboundOverridesOn: 'preset / model 可由调用方通过 metadata 指定',
+    inboundOverridesOff: '已锁定，调用方只能使用上面的路由',
     inboundWorkspace: '工作区分组',
     outboundTitle: '出口（可调用的远程 agent）',
     cardUrl: 'Agent Card 地址',
@@ -270,6 +273,9 @@ const COPY: { zh: Dictionary; en: Dictionary } = {
     inboundModel: 'Model route',
     inboundModelDefault: 'Follows the harness default model',
     inboundPreset: 'Preset',
+    inboundOverrides: 'Caller overrides',
+    inboundOverridesOn: 'preset / model may be named per request via metadata',
+    inboundOverridesOff: 'Locked — callers always get the route above',
     inboundWorkspace: 'Workspace group',
     outboundTitle: 'Outbound (remote agents to call)',
     cardUrl: 'Agent Card URL',
@@ -1086,6 +1092,7 @@ interface ServerInfoValue {
   model?: string
   preset: string
   workspaceTitle: string
+  allowOverrides: boolean
   agentCard: { name: string; description: string; version: string }
 }
 
@@ -1275,6 +1282,10 @@ function ServerInfoPanel(props: { remote: RemoteLike; scope: ScopeLike }): React
                 : t.inboundModelDefault,
             )}
             {row(t.inboundPreset, info.preset)}
+            {row(
+              t.inboundOverrides,
+              info.allowOverrides ? t.inboundOverridesOn : t.inboundOverridesOff,
+            )}
             {row(t.inboundWorkspace, info.workspaceTitle)}
           </div>
           {cardUrl !== undefined ? (
