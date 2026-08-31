@@ -89,6 +89,16 @@ function rowFromServerAgent(agent: ServedAgent): IdentityRow {
   }
 }
 
+/** Whether a draft served-agent list differs from a baseline (by id + all fields). */
+function isDraftChanged(rows: readonly IdentityRow[], baseline: readonly ServedAgent[]): boolean {
+  return (
+    rows.length !== baseline.length ||
+    rows.some(
+      (row, i) => JSON.stringify(row) !== JSON.stringify(rowFromServerAgent(baseline[i] ?? {})),
+    )
+  )
+}
+
 /** The slice of the client settings scope contract this tab consumes. */
 interface ScopeLike {
   getSnapshot(): {
@@ -1099,6 +1109,7 @@ function ServerInfoPanel(props: { scope: ScopeLike }): ReactNode {
     (listener) => scope.subscribe(listener),
     () => scope.getSnapshot(),
   )
+  const serverAgents = snapshot.value?.serverAgents ?? []
   const [info, setInfo] = useState<ServerInfoValue | null>(null)
   const [loading, setLoading] = useState(true)
   const [failed, setFailed] = useState(false)
@@ -1106,15 +1117,29 @@ function ServerInfoPanel(props: { scope: ScopeLike }): ReactNode {
   const [showToken, setShowToken] = useState(false)
   const [tokenCopied, setTokenCopied] = useState(false)
   const [refreshingToken, setRefreshingToken] = useState(false)
-  const [identityRows, setIdentityRows] = useState<IdentityRow[]>([])
+  const [identityRows, setIdentityRows] = useState<IdentityRow[]>(() =>
+    serverAgents.map((a) => rowFromServerAgent(a)),
+  )
   const [savingIdentity, setSavingIdentity] = useState(false)
-  const [editingIdentity, setEditingIdentity] = useState(false)
+  /** Which served-agent card is expanded into its editor (null = all summaries). */
+  const [editingCard, setEditingCard] = useState<number | null>(null)
+  const seeded = useRef(serverAgents)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: seeded/identityRows are compared on purpose; re-seeding must not depend on them as deps.
+  useEffect(() => {
+    // Re-seed the draft when the served-agent set moves underneath and the card
+    // holds no unsaved edits (an external write, a reset, or our own save).
+    if (isDraftChanged(identityRows, seeded.current)) return
+    seeded.current = serverAgents
+    setIdentityRows(serverAgents.map((a) => rowFromServerAgent(a)))
+    setEditingCard(null)
+  }, [serverAgents])
   const editIdentityRow = (index: number, patch: Partial<IdentityRow>): void => {
     setIdentityRows((current) =>
       current.map((row, i) => (i === index ? { ...row, ...patch } : row)),
     )
   }
   const addIdentityRow = (): void => {
+    const index = identityRows.length
     setIdentityRows((current) => [
       ...current,
       {
@@ -1129,9 +1154,11 @@ function ServerInfoPanel(props: { scope: ScopeLike }): ReactNode {
         model: '',
       },
     ])
+    setEditingCard(index)
   }
   const removeIdentityRow = (index: number): void => {
     setIdentityRows((current) => current.filter((_, i) => i !== index))
+    setEditingCard((current) => (current === index ? null : current))
   }
   const refreshServerInfo = useCallback(async (): Promise<void> => {
     try {
@@ -1179,7 +1206,6 @@ function ServerInfoPanel(props: { scope: ScopeLike }): ReactNode {
       <p style={valueStyle}>{value}</p>
     </div>
   )
-  const serverAgents = snapshot.value?.serverAgents ?? []
   const serverOn = info !== null && info.enabled
   const baseUrl = serverOn
     ? (info.publicUrl ?? `http://${info.host}:${String(info.port)}/`)
@@ -1227,17 +1253,13 @@ function ServerInfoPanel(props: { scope: ScopeLike }): ReactNode {
     snapshot.user !== null &&
     typeof snapshot.user === 'object' &&
     'serverAgents' in (snapshot.user as Record<string, unknown>)
-  const identityDirty =
-    identityRows.length !== serverAgents.length ||
-    identityRows.some(
-      (row, i) => JSON.stringify(row) !== JSON.stringify(rowFromServerAgent(serverAgents[i] ?? {})),
-    )
+  const identityDirty = isDraftChanged(identityRows, serverAgents)
   const saveIdentity = async (): Promise<void> => {
     if (savingIdentity) return
     setSavingIdentity(true)
     try {
       await scope.set('serverAgents', identityRows)
-      setEditingIdentity(false)
+      setEditingCard(null)
       setLoading(true)
       setFailed(false)
       await refreshServerInfo()
@@ -1252,7 +1274,7 @@ function ServerInfoPanel(props: { scope: ScopeLike }): ReactNode {
     setSavingIdentity(true)
     try {
       await scope.unset('serverAgents')
-      setEditingIdentity(false)
+      setEditingCard(null)
       setLoading(true)
       setFailed(false)
       await refreshServerInfo()
@@ -1372,7 +1394,7 @@ function ServerInfoPanel(props: { scope: ScopeLike }): ReactNode {
               </span>
             )}
           </div>
-          {serverAgents.length > 0 ? (
+          {serverAgents.length > 0 || identityRows.length > 0 ? (
             <div
               style={{
                 display: 'flex',
@@ -1382,15 +1404,63 @@ function ServerInfoPanel(props: { scope: ScopeLike }): ReactNode {
                 paddingTop: '12px',
               }}
             >
-              <span style={{ fontSize: '12px', fontWeight: 600, color: cssVars.labelPrimary }}>
-                {t.cardUrl}
-              </span>
-              {serverAgents.map((agent) => {
-                const agentUrl = agentCardUrl(agent.id)
-                const presetText = agent.preset?.length > 0 ? agent.preset : '—'
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '8px',
+                }}
+              >
+                <span style={{ fontSize: '12px', fontWeight: 600, color: cssVars.labelPrimary }}>
+                  {t.inboundIdentity}
+                  {info.agentCard.version ? (
+                    <span
+                      style={{
+                        marginLeft: '6px',
+                        fontWeight: 400,
+                        fontSize: '11px',
+                        color: cssVars.labelTertiary,
+                      }}
+                    >
+                      v{info.agentCard.version}
+                    </span>
+                  ) : null}
+                </span>
+                {writable ? (
+                  <Button variant="outline" size="sm" onClick={addIdentityRow}>
+                    + {t.addAgent}
+                  </Button>
+                ) : null}
+              </div>
+              {identityRows.map((row, index) => {
+                const agentUrl = agentCardUrl(row.id)
+                const presetText = row.preset.length > 0 ? row.preset : '—'
+                const editing = editingCard === index
+                const name = row.name.length > 0 ? row.name : row.id
+                const field = (
+                  label: string,
+                  key: keyof IdentityRow,
+                  value: string,
+                  placeholder?: string,
+                ): ReactNode => (
+                  <label style={itemStyle}>
+                    <span style={labelStyle2}>{label}</span>
+                    <input
+                      style={inputStyle2}
+                      value={value}
+                      placeholder={placeholder}
+                      onChange={(event) =>
+                        editIdentityRow(index, {
+                          [key]: event.target.value,
+                        } as Partial<IdentityRow>)
+                      }
+                    />
+                  </label>
+                )
                 return (
                   <div
-                    key={agent.id}
+                    key={row.id.length > 0 ? row.id : `__new-${index}`}
                     style={{
                       display: 'flex',
                       flexDirection: 'column',
@@ -1399,157 +1469,8 @@ function ServerInfoPanel(props: { scope: ScopeLike }): ReactNode {
                       borderTop: `1px dashed ${cssVars.borderL1}`,
                     }}
                   >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <span
-                        style={{
-                          flex: 'none',
-                          fontSize: '11px',
-                          fontWeight: 600,
-                          lineHeight: '18px',
-                          padding: '0 8px',
-                          borderRadius: '999px',
-                          background: cssVars.bgModulePlatform,
-                          color: cssVars.labelSecondary,
-                        }}
-                      >
-                        {presetText}
-                      </span>
-                      <span
-                        style={{
-                          minWidth: 0,
-                          fontSize: '13px',
-                          fontWeight: 600,
-                          color: cssVars.labelPrimary,
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
-                        }}
-                      >
-                        {agent.name?.length > 0 ? agent.name : agent.id}
-                      </span>
-                      <code
-                        style={{ flex: 'none', fontSize: '11px', color: cssVars.labelTertiary }}
-                      >
-                        /agents/{agent.id}
-                      </code>
-                    </div>
-                    {agent.description && agent.description.length > 0 ? (
-                      <p
-                        style={{
-                          margin: 0,
-                          fontSize: '12px',
-                          lineHeight: 1.5,
-                          color: cssVars.labelTertiary,
-                          display: '-webkit-box',
-                          WebkitLineClamp: 2,
-                          WebkitBoxOrient: 'vertical',
-                          overflow: 'hidden',
-                        }}
-                      >
-                        {agent.description}
-                      </p>
-                    ) : null}
-                    {agentUrl !== undefined ? (
-                      <div
-                        style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0 }}
-                      >
-                        <code
-                          title={agentUrl}
-                          style={{
-                            minWidth: 0,
-                            flex: '1',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap',
-                            fontSize: '11px',
-                            color: cssVars.labelSecondary,
-                          }}
-                        >
-                          {agentUrl}
-                        </code>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          style={{ flex: 'none' }}
-                          onClick={() => copyCardUrl(agentUrl)}
-                        >
-                          {copiedUrl === agentUrl ? t.cardUrlCopied : t.cardUrlCopy}
-                        </Button>
-                      </div>
-                    ) : null}
-                  </div>
-                )
-              })}
-            </div>
-          ) : null}
-          {writable ? (
-            <div
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '8px',
-                borderTop: `1px solid ${cssVars.borderL2}`,
-                paddingTop: '12px',
-              }}
-            >
-              {editingIdentity ? (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      gap: '8px',
-                    }}
-                  >
-                    <span
-                      style={{ fontSize: '12px', fontWeight: 600, color: cssVars.labelPrimary }}
-                    >
-                      {t.identityTitle}
-                    </span>
-                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-                      {overridden ? (
-                        <Button variant="ghost" size="sm" onClick={() => void resetIdentity()}>
-                          {t.identityReset}
-                        </Button>
-                      ) : null}
-                      <Button variant="ghost" size="sm" onClick={() => setEditingIdentity(false)}>
-                        {t.discard}
-                      </Button>
-                    </div>
-                  </div>
-                  {identityRows.map((row, index) => {
-                    const field = (
-                      label: string,
-                      key: keyof IdentityRow,
-                      value: string,
-                      placeholder?: string,
-                    ): ReactNode => (
-                      <label style={itemStyle}>
-                        <span style={labelStyle2}>{label}</span>
-                        <input
-                          style={inputStyle2}
-                          value={value}
-                          placeholder={placeholder}
-                          onChange={(event) =>
-                            editIdentityRow(index, {
-                              [key]: event.target.value,
-                            } as Partial<IdentityRow>)
-                          }
-                        />
-                      </label>
-                    )
-                    return (
-                      <div
-                        key={row.id.length > 0 ? row.id : `__new-${index}`}
-                        style={{
-                          display: 'flex',
-                          flexDirection: 'column',
-                          gap: '8px',
-                          padding: '10px 0',
-                          borderTop: `1px dashed ${cssVars.borderL1}`,
-                        }}
-                      >
+                    {editing ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                           <span
                             style={{
@@ -1564,8 +1485,16 @@ function ServerInfoPanel(props: { scope: ScopeLike }): ReactNode {
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => removeIdentityRow(index)}
+                            style={{ flex: 'none' }}
+                            onClick={() => setEditingCard(null)}
+                          >
+                            {t.done}
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
                             style={{ color: cssVars.labelError, flex: 'none' }}
+                            onClick={() => removeIdentityRow(index)}
                           >
                             {t.remove}
                           </Button>
@@ -1600,80 +1529,142 @@ function ServerInfoPanel(props: { scope: ScopeLike }): ReactNode {
                         {field(t.identityProvider, 'provider', row.provider, t.identityProvider)}
                         {field(t.identityModel, 'model', row.model, t.identityModel)}
                       </div>
-                    )
-                  })}
-                  <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
-                    <Button variant="outline" size="sm" onClick={addIdentityRow}>
-                      + {t.addAgent}
-                    </Button>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span
+                            style={{
+                              flex: 'none',
+                              fontSize: '11px',
+                              fontWeight: 600,
+                              lineHeight: '18px',
+                              padding: '0 8px',
+                              borderRadius: '999px',
+                              background: cssVars.bgModulePlatform,
+                              color: cssVars.labelSecondary,
+                            }}
+                          >
+                            {presetText}
+                          </span>
+                          <span
+                            style={{
+                              minWidth: 0,
+                              fontSize: '13px',
+                              fontWeight: 600,
+                              color: cssVars.labelPrimary,
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
+                            {name}
+                          </span>
+                          <code
+                            style={{ flex: 'none', fontSize: '11px', color: cssVars.labelTertiary }}
+                          >
+                            /agents/{row.id}
+                          </code>
+                          <span style={{ flex: '1' }} />
+                          {writable ? (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              style={{ flex: 'none' }}
+                              onClick={() => setEditingCard(index)}
+                            >
+                              {t.identityEdit}
+                            </Button>
+                          ) : null}
+                          {writable ? (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              style={{ color: cssVars.labelError, flex: 'none' }}
+                              onClick={() => removeIdentityRow(index)}
+                            >
+                              {t.remove}
+                            </Button>
+                          ) : null}
+                        </div>
+                        {row.description.length > 0 ? (
+                          <p
+                            style={{
+                              margin: 0,
+                              fontSize: '12px',
+                              lineHeight: 1.5,
+                              color: cssVars.labelTertiary,
+                              display: '-webkit-box',
+                              WebkitLineClamp: 2,
+                              WebkitBoxOrient: 'vertical',
+                              overflow: 'hidden',
+                            }}
+                          >
+                            {row.description}
+                          </p>
+                        ) : null}
+                        {agentUrl !== undefined ? (
+                          <div
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '6px',
+                              minWidth: 0,
+                            }}
+                          >
+                            <code
+                              title={agentUrl}
+                              style={{
+                                minWidth: 0,
+                                flex: '1',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                                fontSize: '11px',
+                                color: cssVars.labelSecondary,
+                              }}
+                            >
+                              {agentUrl}
+                            </code>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              style={{ flex: 'none' }}
+                              onClick={() => copyCardUrl(agentUrl)}
+                            >
+                              {copiedUrl === agentUrl ? t.cardUrlCopied : t.cardUrlCopy}
+                            </Button>
+                          </div>
+                        ) : null}
+                      </div>
+                    )}
                   </div>
-                  <div
-                    style={{
-                      display: 'flex',
-                      justifyContent: 'flex-end',
-                      gap: '6px',
-                      borderTop: `1px solid ${cssVars.borderL2}`,
-                      paddingTop: '10px',
-                    }}
-                  >
-                    <Button
-                      variant="primary"
-                      size="sm"
-                      onClick={() => void saveIdentity()}
-                      disabled={!identityDirty || savingIdentity}
-                    >
-                      {savingIdentity ? t.identitySaving : t.identitySave}
-                    </Button>
-                  </div>
-                </div>
-              ) : (
+                )
+              })}
+              {writable ? (
                 <div
                   style={{
                     display: 'flex',
-                    flexDirection: 'column',
+                    justifyContent: 'flex-end',
                     gap: '6px',
                     borderTop: `1px solid ${cssVars.borderL2}`,
-                    paddingTop: '12px',
+                    paddingTop: '10px',
                   }}
                 >
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      gap: '8px',
-                    }}
-                  >
-                    <span
-                      style={{ fontSize: '12px', fontWeight: 600, color: cssVars.labelPrimary }}
-                    >
-                      {t.inboundIdentity}
-                      {info.agentCard.version ? (
-                        <span
-                          style={{
-                            marginLeft: '6px',
-                            fontWeight: 400,
-                            fontSize: '11px',
-                            color: cssVars.labelTertiary,
-                          }}
-                        >
-                          v{info.agentCard.version}
-                        </span>
-                      ) : null}
-                    </span>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => {
-                        setIdentityRows(serverAgents.map((a) => rowFromServerAgent(a)))
-                        setEditingIdentity(true)
-                      }}
-                    >
-                      {t.identityEdit}
+                  {overridden ? (
+                    <Button variant="ghost" size="sm" onClick={() => void resetIdentity()}>
+                      {t.identityReset}
                     </Button>
-                  </div>
+                  ) : null}
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    onClick={() => void saveIdentity()}
+                    disabled={!identityDirty || savingIdentity}
+                  >
+                    {savingIdentity ? t.identitySaving : t.identitySave}
+                  </Button>
                 </div>
-              )}
+              ) : null}
             </div>
           ) : null}
         </div>
