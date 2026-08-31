@@ -732,11 +732,11 @@ export class DshAgentExecutor implements AgentExecutor {
    * the configured base, so the harness sandbox fence (workspace-write against
    * SessionHeader.cwd) isolates each caller context's filesystem.
    *
-   * Directory naming: `A2A-{caller}-{MMDD}-{hash6}` — a readable slug of
-   * the caller's contextId, the session's first-seen month-day, and 6 hash
-   * chars of the stable session id so slug collisions can never merge or
-   * split a caller's identity. Sessions minted before readable naming (raw
-   * session-id dirs) are adopted as-is, so live sessions never move.
+   * Directory naming: `A2A-{caller}-{MMDD}-{HHMMSS}-{hash6}` — a readable slug
+   * of the caller's contextId, the session's first-seen month-day plus creation
+   * time, and 6 hash chars of the stable session id so slug collisions can
+   * never merge or split a caller's identity. Sessions minted before readable
+   * naming (raw session-id dirs) are adopted as-is, so live sessions never move.
    */
   private sessionDir(sessionId: SessionId, contextId: string): string {
     const base = this.options.cwd ?? process.cwd()
@@ -753,7 +753,11 @@ export class DshAgentExecutor implements AgentExecutor {
       contextId
         .replace(/[^A-Za-z0-9_-]+/g, '-')
         .replace(/^-+|-+$/g, '')
-        .slice(0, 24) || 'caller'
+        .slice(0, 24)
+        // The 24-char cut can land on a hyphen (a UUID-style contextId), which
+        // would render a `--` before the timestamp; trim it so the dir reads
+        // `A2A-<caller>-<MMDD>-<HHMMSS>-<hash6>`.
+        .replace(/-+$/, '') || 'caller'
     const d = new Date()
     const pad = (n: number) => String(n).padStart(2, '0')
     const stamp = `${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`
