@@ -40,6 +40,8 @@ export interface ServerInfo {
   model?: string
   preset: string
   workspaceTitle: string
+  /** Whether callers may override the preset and the model route per request. */
+  allowOverrides: boolean
   agentCard: { name: string; description: string; version: string }
 }
 
@@ -61,6 +63,7 @@ export function serverInfoOf(ref: ServerRef): ServerInfo {
       apiKeySet: false,
       preset: 'standard',
       workspaceTitle: 'A2A',
+      allowOverrides: true,
       agentCard: { name: ref.agentCard.name, description: ref.agentCard.description, version: '' },
     }
   }
@@ -77,6 +80,7 @@ export function serverInfoOf(ref: ServerRef): ServerInfo {
     model: server.model,
     preset: server.preset,
     workspaceTitle: server.workspaceTitle,
+    allowOverrides: server.allowOverrides,
     agentCard: {
       name: ref.agentCard.name,
       description: ref.agentCard.description,

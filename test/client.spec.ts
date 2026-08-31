@@ -21,7 +21,15 @@ import { A2aServer } from '../src/server.js'
 import { A2aRegistry, a2aTools } from '../src/tools.js'
 import { freePort } from './net.js'
 
-const testAgent = { id: 'test', name: 'test-agent', description: 'test', version: '0.1.0', preset: 'standard', cwd: '/tmp', workspaceTitle: 'A2A' }
+const testAgent = {
+  id: 'test',
+  name: 'test-agent',
+  description: 'test',
+  version: '0.1.0',
+  preset: 'standard',
+  cwd: '/tmp',
+  workspaceTitle: 'A2A',
+}
 
 const observedHeaders: string[] = []
 
