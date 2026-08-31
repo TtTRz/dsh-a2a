@@ -13,7 +13,10 @@
 
 ## ✨ 特性
 
-- 🤖 **一个 contextId = 一个 harness agent**——会话 id 由 `sha256(contextId)` 确定性派生，挂载 preset（默认 `standard`），跨轮次延续
+- 🤖 **多 agent 服务器**——一个端点服务多个 agent，每个在自身 `/agents/<id>`，各有自己的 preset、模型路由、工作区、Agent Card 身份与 `skills`；一个 `contextId` 映射为该 agent 的一个持久 harness 会话（`sha256(contextId)` 确定性派生 id），挂载 preset、跨轮次延续
+- 📇 **Agent Card 级 `skills`**——每个 agent 在它自己的 card 上以 A2A `AgentSkill[]`（`id` / `name` / `description`）宣称能力，A2A 客户端可按"这个 agent 干什么用"路由
+- 🎛️ **动态管理被服务 agent**——设置页入口编辑器可新增/删除/改身份；保存即对运行中的服务器做 reconcile，无需重启
+- 🔑 **token 查看与轮换**——设置页展示 Bearer key（默认掩码、可显示+复制）并可轮换，新 key 即时生效并写入 settings 文档持久化
 - 🔌 **完整 A2A v1.0 线格式**——`/.well-known/agent-card.json`、JSON-RPC `SendMessage` / `SendStreamingMessage` / `GetTask` / `CancelTask` / `ListTasks`（流式走 SSE）、REST `message:send` / `tasks/*`——全部经官方 SDK 的 request handler
 - 🔒 **客户端 header 鉴权**——每个 agent 的 headers 支持 `${ENV_VAR}` 占位符调用时解析，凭证不进配置
 - 🔑 **服务端 Bearer 鉴权**——设了 `server.apiKey` 后，除 Agent Card 外的所有请求须带 `Authorization: Bearer <key>`；Agent Card 还可宣告反代后的 `publicUrl`
@@ -55,20 +58,23 @@ curl -s http://127.0.0.1:8899/ -H 'Content-Type: application/json' \
       enabled: true            # 是否开启 A2A 端点
       host: 127.0.0.1          # A2A_HOST
       port: 8899               # A2A_PORT
-      preset: standard         # 挂进每个会话 agent 的 preset
       turnTimeoutMs: 300000    # 单轮超时
       allowOverrides: true     # 允许调用方按请求指定 preset/model
-      agentCard:
-        name: dsh-a2a
-        description: A DeepSeek Harness agent exposed over the A2A protocol.
-        version: '0.1.0'
-    agents:                    # a2a_call 可触达的远程 agent
-      - name: specialist
-        url: http://127.0.0.1:9000/
-        headers:
-          authorization: Bearer ${SPECIALIST_TOKEN}
-        description: 领域问题的专家 agent。
+      agents:                  # 在本机 /agents/<id> 托管的本地 agent
+        - id: support
+          name: Support Agent
+          description: Answers internal support questions.
+          version: '0.1.0'
+          preset: standard
+          workspaceTitle: A2A
+          skills:
+            - id: query-orders
+              name: Query orders
+              description: Look up an order's status and timeline.
+    agents: []                 # a2a_call 可触达的远程 agent
 ```
+
+每个本地 agent 位于 `/agents/<id>/.well-known/agent-card.json`，并有自己的会话命名空间（`a2a-<id>-<hash>`）、工作区分组与 Agent Card。旧的单 agent 形式（`server.preset` / `server.agentCard`）仍可用：`server.agents` 为空时，从它派生出一个 agent。
 
 | 字段 | 默认 | 含义 |
 | --- | --- | --- |
@@ -82,8 +88,14 @@ curl -s http://127.0.0.1:8899/ -H 'Content-Type: application/json' \
 | `server.provider` / `server.model` | — | A2A 会话模型路由，必须成对设置；缺省用 harness 默认模型；env `A2A_PROVIDER` / `A2A_MODEL` |
 | `server.cwd` | `~/.a2a-sessions` | A2A 会话工作目录（兼作侧边栏 workspace 路径）；env `DSH_A2A_CWD` |
 | `server.workspaceTitle` | `A2A` | 侧边栏 A2A 会话分组标题 |
-| `server.agentCard.*` | — | 展示给调用方的 Agent Card 身份 |
-| `agents[].name` / `url` | — | `a2a_call` 用的注册名 + Agent Card URL |
+| `server.agents[].id` | — | `/agents/` 下的 URL slug（须 URL-safe），如 `support` |
+| `server.agents[].name` / `description` / `version` | — | 该 agent 的 Agent Card 身份 |
+| `server.agents[].preset` | — | 挂进该 agent 会话的 preset |
+| `server.agents[].provider` / `model` | — | 该 agent 的模型路由（须成对）；缺省用 harness 默认 |
+| `server.agents[].cwd` / `workspaceTitle` | `server.cwd` / `A2A` | 该 agent 的工作目录 / 分组标题 |
+| `server.agents[].skills` | `[]` | 该 agent card 上宣告的 A2A `AgentSkill[]`（`id` / `name` / `description`） |
+| `server.agentCard.*` | — | 旧单 agent 身份（`server.agents` 为空时用） |
+| `agents[].name` / `url` | — | **远程** `a2a_call` 注册名 + Agent Card URL |
 | `agents[].headers` | `{}` | 请求头；`${ENV_VAR}` 占位符调用时解析 |
 | `agents[].description` | `''` | `a2a_list` 展示 |
 
@@ -164,21 +176,21 @@ patch 层改动在装配期读取，改完需重启 `dsh web` 才生效；GUI �
 
 ## 🏗️ 工作原理
 
-- server 是**独立 Node HTTP 监听**（不挂在 web GUI 路由上）：Agent Card 与 JSON-RPC 位于 agent 根 URL，而 web 应用已占用根路径。生命周期绑定 Cordis fiber——插件加载时起监听，卸载时连同 socket 一起关。
-- executor 实现 SDK 的 `AgentExecutor` 契约：先发 `task` 事件 → 跑一轮 harness（`followup` → 带截止时间的 `whenIdle` → 超时 `cancel`）→ 回复以 `message` 事件发出 → 终态 `statusUpdate`。`CancelTask` 通过运行任务表找到正确的 agent。
+- server 是**独立 Node HTTP 监听**（不挂在 web GUI 路由上）：它服务多个本地 agent，每个在 `/agents/<id>/...`，各有自己的 Agent Card、JSON-RPC + REST 面、挂载 preset 的 executor 与会话命名空间。根 `/.well-known/agent-card.json` 返回第一个 agent（`/` 无默认 agent）；`server.agents[]` 为多 agent 形态，旧单 agent 配置派生一个 agent。生命周期绑定 Cordis fiber——插件加载时起监听，卸载时连同 socket 一起关。
+- 每个 agent 的 executor 实现 SDK 的 `AgentExecutor` 契约：先发 `task` 事件 → 跑一轮 harness（`followup` → 带截止时间的 `whenIdle` → 超时 `cancel`）→ 回复以 `message` 事件发出 → 终态 `statusUpdate`。`CancelTask` 通过运行任务表找到正确的 agent；executor 按 `contextId` 命名会话（命名空间 `a2a-<agentId>-<hash>`），后续轮次继续同一会话。
 - client 用 SDK 的 `ClientFactory`（JSON-RPC + REST 双传输）解析注册表，authenticating fetch 注入每个 agent 的 headers。
 
 ## ⚠️ 限制
 
 - 入站鉴权：0.3.0 起可设 `server.apiKey` 开启 Bearer token 校验（Agent Card 除外——它必须公开可读）；大规模部署仍建议再套鉴权网关或反代，Agent Card 不声明 security scheme
-- 单个 executor 实例服务所有 context；跨轮次延续会话，但 dsh 重启后内存态重建（`sessionPersistence` 持久化是规划中的后续）
+- **每个 `/agents/<id>` 一个 executor 实例**（服务该 agent 的所有 context）；session 跨轮次延续，但 dsh 重启后内存态重建。根 `/.well-known/agent-card.json` 只返回第一个 agent——指定某个 agent 请走 `/agents/<id>/...`
 - `model` 覆盖只能切换本 executor 实例创建的会话；从外部 adopt 来的会话（在 web UI 打开过、或从磁盘恢复的）没有可切换的路由句柄，覆盖值记日志后忽略，回复沿用创建时的模型。会话由本 executor 创建之后再发 model 则正常切换
 - **0.2.0 起注册表支持 GUI 配置**：设置 → 插件 → 插件配置里的「A2A 远程 agent」卡片可直接增删改注册表，保存即热更新 `a2a_call` / `a2a_list`，无需重启；重置则恢复部署默认（cordis 行配置）。配置落在 settings 文档的 `a2a` 命名空间，解析层级为 schema 默认值 → 行配置 base → 用户覆盖
 
 ## 🧪 开发
 
 ```sh
-npm run check   # biome + typecheck + vitest（49 个测试）+ 构建
+npm run check   # biome + typecheck + vitest（59 个测试）+ 构建
 ```
 
 测试覆盖配置校验、官方 A2A client 走真实 HTTP 端口的 Agent Card + JSON-RPC 往返、按 context 会话延续、任务取消、header 鉴权、请求级覆盖与模型工具。
