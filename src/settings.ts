@@ -65,7 +65,14 @@ export interface A2aSettingsApplied {
 }
 
 /** One registry row as stored in the settings document. */
-export const AgentEntrySettings = z.object({
+export interface AgentEntrySettingsShape {
+  name: string
+  url: string
+  description?: string
+  headers?: Record<string, string>
+}
+// 显式 z<Shape> 注解：避免 dts 生成时引用到 cosmokit 内部类型（TS2742）。
+export const AgentEntrySettings: z<AgentEntrySettingsShape> = z.object({
   name: z.string(),
   url: z.string(),
   description: z.string().default(''),
@@ -73,7 +80,19 @@ export const AgentEntrySettings = z.object({
 })
 
 /** One served-agent row as stored in the settings document (blank = inherit). */
-export const AgentSpecSettings = z.object({
+export interface AgentSpecSettingsShape {
+  id: string
+  name?: string
+  description?: string
+  version?: string
+  preset?: string
+  cwd?: string
+  workspaceTitle?: string
+  provider: string
+  model: string
+  skills?: AgentSkillSpec[]
+}
+export const AgentSpecSettings: z<AgentSpecSettingsShape> = z.object({
   id: z.string(),
   name: z.string().default(''),
   description: z.string().default(''),
@@ -99,7 +118,12 @@ export const AgentSpecSettings = z.object({
  * the endpoint Bearer key. Blank fields fall back to the composition base (the
  * cordis row) and the server defaults, never to the hard-coded defaults.
  */
-export const A2aSettings = z.object({
+export interface A2aSettingsShape {
+  agents?: AgentEntrySettingsShape[]
+  serverAgents?: AgentSpecSettingsShape[]
+  apiKey?: string
+}
+export const A2aSettings: z<A2aSettingsShape> = z.object({
   agents: z.array(AgentEntrySettings).default([]),
   serverAgents: z.array(AgentSpecSettings).default([]),
   apiKey: z.string().default(''),
