@@ -252,6 +252,28 @@ export function textOf(message: Message): string {
 }
 
 /**
+ * Read a LIVE session's events across harness versions.
+ *
+ * `@deepseek-ai/dsh-session` 0.1.5-rc.2 renamed the `session.events` getter to
+ * `session.snapshotEvents()`. This package's pinned types are the older ones,
+ * so `session.events` still compiles while the RUNTIME (the deployment's newer
+ * package) answers `undefined` — the 2026-09-11 upgrade. Prefer the new
+ * accessor and fall back to the old getter so either runtime works.
+ */
+export function liveEvents(session: unknown): readonly SessionEvent[] {
+  const target = session as
+    | {
+        snapshotEvents?: () => readonly SessionEvent[]
+        events?: readonly SessionEvent[]
+      }
+    | null
+    | undefined
+  if (target === null || target === undefined) return []
+  if (typeof target.snapshotEvents === 'function') return target.snapshotEvents()
+  return target.events ?? []
+}
+
+/**
  * Collect the durable image attachment refs produced during one turn: cards
  * rendered by tools (e.g. `render_card`) land as image blocks inside
  * tool-result events. Returns them oldest-first.
@@ -365,7 +387,7 @@ export class DshAgentExecutor implements AgentExecutor {
       // artifacts BEFORE the terminal status: the SDK's execution queue ends
       // the event stream at the first terminal statusUpdate, so artifacts
       // published afterwards would never reach the caller.
-      await this.publishCardArtifacts(eventBus, taskId, contextId, turn.agent.session.events)
+      await this.publishCardArtifacts(eventBus, taskId, contextId, liveEvents(turn.agent.session))
       // The reply must ride ON the terminal status: publishing a separate
       // message first would strand the task in WORKING forever in the task
       // store.
@@ -375,7 +397,7 @@ export class DshAgentExecutor implements AgentExecutor {
           contextId,
           status: status(
             TaskStateEnum.TASK_STATE_COMPLETED,
-            agentMessage(collectReplyText(turn.agent.session.events), taskId, contextId),
+            agentMessage(collectReplyText(liveEvents(turn.agent.session)), taskId, contextId),
           ),
           metadata: {},
         }),

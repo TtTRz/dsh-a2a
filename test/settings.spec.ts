@@ -169,3 +169,45 @@ describe('attachSettings', () => {
     expect(warnings.some((warning) => warning.includes('dropped 1'))).toBe(true)
   })
 })
+
+describe('rc.2 volatile settings', () => {
+  it('reads live refs and persists the API key through the owning entry', () => {
+    let key = 'test-key'
+    let notify: (() => void) | undefined
+    const update = vi.fn(async () => {})
+    const onChange = vi.fn()
+    const ctx = {
+      fiber: { entry: { options: { id: 'custom-a2a' } } },
+      inject: (_deps: string[], callback: (scope: unknown) => void) =>
+        callback({ settings: { update } }),
+      effect: (callback: () => unknown) => callback(),
+      on: (name: string, callback: () => void) => {
+        expect(name).toBe('loader/volatile-update')
+        notify = callback
+        return () => {}
+      },
+      logger: { warn: vi.fn() },
+    }
+    const handle = attachSettings(
+      ctx as never,
+      { agents: [], serverAgents: IDENTITY },
+      DEFAULTS,
+      onChange,
+      {
+        agents: { get: () => [] },
+        serverAgents: { get: () => [] },
+        apiKey: { get: () => key },
+      } as never,
+    )
+    expect(onChange.mock.lastCall?.[0]).toEqual({
+      agents: [],
+      serverAgents: IDENTITY,
+      apiKey: 'test-key',
+    })
+    key = 'new-key'
+    notify?.()
+    expect(onChange.mock.lastCall?.[0].apiKey).toBe('new-key')
+    handle.persistApiKey('saved-key')
+    expect(update).toHaveBeenCalledWith('custom-a2a', { apiKey: 'saved-key' })
+  })
+})

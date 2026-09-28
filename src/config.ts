@@ -107,11 +107,19 @@ export interface AgentSkillSpec {
 export interface Config {
   server?: ServerOptions
   agents?: AgentEntry[]
+  serverAgents?: AgentSpec[]
+  apiKey?: string
 }
 
 export const DEFAULT_PORT = 8899
 export const DEFAULT_TURN_TIMEOUT_MS = 300_000
 export const DEFAULT_CALL_TIMEOUT_MS = 300_000
+
+// rc.2 extends schemastery fields with volatile configuration metadata.
+function liveField<S, T>(schema: z<S, T>): z<S, T> {
+  const field = schema as z<S, T> & { volatile?: () => z<S, T> }
+  return typeof field.volatile === 'function' ? field.volatile() : field
+}
 
 export const Config: z<Config> = z.object({
   server: z.object({
@@ -158,16 +166,20 @@ export const Config: z<Config> = z.object({
     workspaceTitle: z.string().default('A2A'),
     allowOverrides: z.boolean().default(true),
   }),
-  agents: z
-    .array(
-      z.object({
-        name: z.string(),
-        url: z.string(),
-        headers: z.any(),
-        description: z.string(),
-      }),
-    )
-    .default([]),
+  agents: liveField(
+    z
+      .array(
+        z.object({
+          name: z.string(),
+          url: z.string(),
+          headers: z.any(),
+          description: z.string(),
+        }),
+      )
+      .default([]),
+  ),
+  serverAgents: liveField(z.array(z.any()).default([])),
+  apiKey: liveField(z.string().role('secret').default('')),
 })
 
 export interface ResolvedAgentSpec {
@@ -492,7 +504,7 @@ export function resolveConfig(input: Config): ResolvedConfig {
       },
       preset: server.preset ?? 'standard',
     },
-    agents: (input.agents ?? []).map((entry, index) => {
+    agents: readLive(input.agents, []).map((entry, index) => {
       const label = `agents[${index}]`
       const name = entry.name.trim()
       if (name.length === 0) throw new Error(`dsh-a2a: ${label}.name must not be empty`)
@@ -513,4 +525,16 @@ export function resolveConfig(input: Config): ResolvedConfig {
       }
     }),
   }
+}
+
+/** Unwrap a volatile configuration ref, leaving ordinary config values alone. */
+export function readLive<T>(value: T | { get(): T } | undefined, fallback: T): T {
+  if (
+    value !== null &&
+    typeof value === 'object' &&
+    'get' in value &&
+    typeof value.get === 'function'
+  )
+    return value.get()
+  return (value ?? fallback) as T
 }

@@ -19,7 +19,16 @@
  * @module dsh-a2a/client
  */
 
-import { Button, IconQuestionOutline14 } from '@deepseek-ai/dsh-client-ui-primitives'
+import * as primitives from '@deepseek-ai/dsh-client-ui-primitives'
+
+const { Button } = primitives
+const IconQuestion =
+  (
+    primitives as typeof primitives & {
+      IconQuestionOutlineRegular?: typeof primitives.IconQuestionOutline14
+    }
+  ).IconQuestionOutlineRegular ?? primitives.IconQuestionOutline14
+
 import {
   type ReactNode,
   useCallback,
@@ -46,7 +55,7 @@ export const name = 'dsh-a2a-client'
 // The settings tab reads the Host through plain `fetch` (client-api.js), not a
 // Typert Remote surface, so no `remote` inject is needed and no namespace
 // service mount can park the fiber waiting on itself.
-export const inject = ['slots', 'settingsScope']
+export const inject = ['slots', 'configForms']
 
 /** A served-agent row as the settings document stores it (blank = inherit). */
 interface ServedAgent {
@@ -1702,7 +1711,7 @@ function TutorialPopover(): ReactNode {
           color: open ? cssVars.labelPrimary : cssVars.labelTertiary,
         }}
       >
-        <IconQuestionOutline14 style={{ display: 'block' }} />
+        <IconQuestion style={{ display: 'block' }} />
       </button>
       {open ? (
         <div
@@ -1786,11 +1795,9 @@ export function apply(ctx: unknown): void {
     get(service: string): unknown
   }
   const slots = c.get('slots') as SlotsSurface | undefined
-  const binder = c.get('settingsScope') as
-    | { bind(spec: { namespace: string }): ScopeLike }
-    | undefined
+  const binder = c.get('configForms') as { get(namespace: string): ScopeLike } | undefined
   if (slots === undefined || binder === undefined) return
-  const scope = binder.bind({ namespace: NAMESPACE })
+  const scope = binder.get(NAMESPACE)
   slots.inject('settings.section', () =>
     slots.register({ name: 'settings.section', id: 'a2a', order: 900, label: 'A2A' }, () => (
       <A2aSection scope={scope} />

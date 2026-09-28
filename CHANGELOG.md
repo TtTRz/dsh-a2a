@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- Restore settings on dsh rc.2 using config forms, volatile fields and current icons.
+- Read live session snapshots on newer harness versions when collecting replies and cards.
+- Strip the REST cancellation suffix before looking up a task.
+
 ## [0.7.1] - 2026-08-31
 
 ### Changed

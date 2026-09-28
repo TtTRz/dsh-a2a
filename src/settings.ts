@@ -17,10 +17,12 @@ import z from '@deepseek-ai/schemastery'
 import {
   type AgentEntry,
   type AgentSkillSpec,
+  type Config,
   normalizeAgents,
   normalizeServerAgents,
   type ResolvedAgentEntry,
   type ResolvedAgentSpec,
+  readLive,
   type ServerAgentDefaults,
 } from './config.js'
 
@@ -134,7 +136,8 @@ export const A2aSettings: z<A2aSettingsShape> = z.object({
  * the package gains no hard dependency beyond its peers.
  */
 interface SettingsService {
-  register(
+  update?(namespace: string, patch: Record<string, unknown>): Promise<void>
+  register?(
     ns: string,
     schema: unknown,
     options: { base?: Record<string, unknown>; applies?: 'live' | 'restart' },
@@ -160,18 +163,22 @@ export function attachSettings(
   base: { agents: AgentEntry[]; serverAgents: ResolvedAgentSpec[]; apiKey?: string },
   defaults: ServerAgentDefaults,
   onChange: (value: A2aSettingsApplied) => void,
+  rawConfig: Config = {},
 ): { persistApiKey(apiKey: string): void } {
   const persister = { fn: (_apiKey: string): void => {} }
   ctx.inject(['settings'], (scoped) => {
     const settings = (scoped as unknown as { settings: SettingsService }).settings
-    const scope = settings.register(SETTINGS_NAMESPACE, A2aSettings, {
-      base: {
-        agents: base.agents,
-        serverAgents: base.serverAgents,
-        apiKey: base.apiKey ?? '',
-      },
-      applies: 'live',
-    })
+    const scope =
+      typeof settings.register !== 'function'
+        ? nativeSettingsScope(ctx, settings, rawConfig, base)
+        : settings.register(SETTINGS_NAMESPACE, A2aSettings, {
+            base: {
+              agents: base.agents,
+              serverAgents: base.serverAgents,
+              apiKey: base.apiKey ?? '',
+            },
+            applies: 'live',
+          })
     persister.fn = (apiKey) => {
       void scope.set('apiKey', apiKey)
     }
@@ -203,4 +210,30 @@ export function attachSettings(
     apply(scope.get())
   })
   return { persistApiKey: (apiKey) => persister.fn(apiKey) }
+}
+
+/** rc.2 stores live fields on the owning plugin entry instead of a registered namespace. */
+function nativeSettingsScope(
+  ctx: Context,
+  settings: SettingsService,
+  config: Config,
+  base: { agents: AgentEntry[]; serverAgents: ResolvedAgentSpec[]; apiKey?: string },
+) {
+  const owner = (ctx as unknown as { fiber: { entry?: { options: { id?: string } } } }).fiber.entry
+    ?.options.id
+  if (!owner || typeof settings.update !== 'function')
+    throw new Error('A2A settings owner is unavailable')
+  const update = settings.update.bind(settings)
+  const get = () => ({
+    agents: readLive(config.agents, base.agents),
+    serverAgents: readLive(config.serverAgents, base.serverAgents) as ServerAgentSpec[],
+    apiKey: readLive(config.apiKey, base.apiKey ?? ''),
+  })
+  const events = ctx as unknown as { on(name: string, listener: () => void): () => void }
+  return {
+    get,
+    watch: (listener: (value: A2aSettingsValue) => void) =>
+      events.on('loader/volatile-update', () => listener(get())),
+    set: (key: string, value: unknown) => update(owner, { [key]: value }),
+  }
 }

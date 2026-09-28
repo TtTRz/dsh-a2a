@@ -315,6 +315,30 @@ describe('A2A server with a harness executor', () => {
     expect(port).toBeGreaterThan(0)
   })
 
+  it('cancels through the REST path `tasks/<id>:cancel` with the suffix stripped', async () => {
+    const port = await freePort()
+    const server = new A2aServer({
+      config: resolveConfig({ server: { host: '127.0.0.1', port } }).server,
+      agents: [{ agent: testAgent, executor: new FakeExecutor() as unknown as AgentExecutor }],
+    })
+    await server.start()
+    try {
+      // The handler must route `tasks/<id>:cancel` AND hand the store the BARE id.
+      // A greedy `([^/]+)(?::cancel)?` capture swallowed the verb, so the lookup
+      // became `<id>:cancel` and every cancel answered "Task not found" without
+      // ever reaching the executor's cancelTask (2026-09-15: a stuck A2A turn
+      // could not be stopped at all). A missing task keeps this deterministic —
+      // the reply names exactly the id the store was asked for.
+      const response = await fetch(`${server.url}agents/test/tasks/no-such-task:cancel`, {
+        method: 'POST',
+      })
+      const body = (await response.json()) as { error?: string }
+      expect(body.error).toBe('Task not found: no-such-task')
+    } finally {
+      await server.stop()
+    }
+  })
+
   it('enforces the configured API key on everything but the Agent Card', async () => {
     const port = await freePort()
     const executor = new DshAgentExecutor(fakeCtx(), {

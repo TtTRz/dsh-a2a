@@ -142,6 +142,7 @@ export function apply(ctx: Context, config: PluginConfig): void {
       // Hot-apply the endpoint key (and keep the running server in sync).
       resolved.server.apiKey = value.apiKey
     },
+    config,
   )
   registerA2aRoutes(ctx, serverRef, settingsApi.persistApiKey)
 }

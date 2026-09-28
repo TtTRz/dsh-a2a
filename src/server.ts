@@ -35,6 +35,8 @@ import {
 import type { ResolvedAgentSpec, ResolvedServer } from './config.js'
 
 const MAX_BODY_BYTES = 16 * 1024 * 1024
+/** REST-binding verb suffix for cancelling a task (`POST tasks/<id>:cancel`). */
+const CANCEL_SUFFIX = ':cancel'
 const SSE_HEADERS = {
   'Content-Type': 'text/event-stream',
   'Cache-Control': 'no-cache',
@@ -385,10 +387,17 @@ export class A2aServer {
       )
       return
     }
-    const taskMatch = /^tasks\/([^/]+)(?::cancel)?$/.exec(sub)
+    const taskMatch = /^tasks\/([^/]+)$/.exec(sub)
     if (taskMatch !== null && taskMatch[1] !== undefined) {
-      const taskId = decodeURIComponent(taskMatch[1])
-      if (req.method === 'GET' && !sub.endsWith(':cancel')) {
+      // Google's REST binding carries the verb as a path suffix (`tasks/<id>:cancel`).
+      // The id must be taken from the segment with the suffix STRIPPED: a greedy
+      // `([^/]+)(?::cancel)?` swallows `:cancel` into the capture, so cancel looked up
+      // a task literally named `<id>:cancel` and every cancel answered
+      // "Task not found" without ever reaching the executor (2026-09-15).
+      const segment = decodeURIComponent(taskMatch[1])
+      const cancel = segment.endsWith(CANCEL_SUFFIX)
+      const taskId = cancel ? segment.slice(0, -CANCEL_SUFFIX.length) : segment
+      if (req.method === 'GET' && !cancel) {
         sendJson(
           res,
           200,
@@ -396,7 +405,7 @@ export class A2aServer {
         )
         return
       }
-      if (req.method === 'POST' && sub.endsWith(':cancel')) {
+      if (req.method === 'POST' && cancel) {
         sendJson(
           res,
           200,
