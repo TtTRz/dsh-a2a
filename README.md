@@ -29,7 +29,9 @@ One plugin, two halves, built on the official [`@a2a-js/sdk`](https://github.com
 ## 🚀 Quick Start
 
 ```sh
-dsh plugin --profile web add dsh-a2a
+# This revision targets exactly dsh 0.1.7-rc.2.
+npm install -g @deepseek-ai/dsh@0.1.7-rc.2
+dsh plugin --profile web add github:TtTRz/dsh-a2a
 
 export A2A_HOST=127.0.0.1
 export A2A_PORT=8899
@@ -45,6 +47,47 @@ curl -s http://127.0.0.1:8899/ -H 'Content-Type: application/json' \
 ```
 
 `A2A_ENABLED=0` runs the client tools only (no listener).
+
+## Compatibility and installation
+
+The 0.7.2 source revision targets **dsh 0.1.7-rc.2**. Its Harness peers and
+build dependencies are pinned to that release; Cordis is pinned to `4.0.4`,
+Cosmokit to `1.8.5`, and Schemastery to `3.18.4`. Other Harness releases are
+not covered by this compatibility claim. Node.js must be at least `22.19`.
+The installation smoke test runs on Linux with Node.js 26 and pnpm 11.
+
+The quick start installs from GitHub because the source fix may precede the
+npm release. For reproducible deployments, append a reviewed full commit SHA
+to the Git spec: `github:TtTRz/dsh-a2a#<commit>`.
+
+With pnpm 11, the first Git install may stop with
+`ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED`. Copy the **exact `allowBuilds` entry
+printed by pnpm** into that profile's `pnpm-workspace.yaml`, preserving its
+existing settings, then run the same install command again. The key includes
+the Git source and resolved commit; allowing just `dsh-a2a` is insufficient.
+Review the commit before allowing its `prepare` build script. Do not enable
+all dependency build scripts globally.
+
+**Do not install missing Harness peers individually into the profile.** dsh
+provides them through its runtime module resolver. Its generated
+`pnpm-workspace.yaml` deliberately sets `autoInstallPeers: false` and
+`nodeLinker: hoisted`. Keep those settings. `pnpm peers check` and a standalone
+`node import(...)` do not use the dsh resolver, so neither is a plugin-load
+test. Unversioned `pnpm add @deepseek-ai/dsh-*` can select stale `latest` tags
+and shadow the host runtime with incompatible packages (see [#6](https://github.com/TtTRz/dsh-a2a/issues/6)).
+
+If an existing profile already contains manually installed Harness packages,
+first verify the plugin in a fresh profile without changing the original:
+
+```sh
+dsh --profile a2a-test --from-default-profile web --dump-config > /dev/null
+dsh plugin --profile a2a-test add github:TtTRz/dsh-a2a
+A2A_PORT=8900 dsh --profile a2a-test --port 3100 --no-open
+```
+
+Use free ports if these are occupied. A successful install should serve
+`http://127.0.0.1:8900/.well-known/agent-card.json`. Existing profile dependencies
+should be backed up and reviewed before removing any manually added packages.
 
 ## ⚙️ Configuration
 
@@ -193,8 +236,15 @@ Patch-layer changes are read at assembly time — restart `dsh web` to apply the
 ## 🧪 Development
 
 ```sh
-npm run check   # biome + typecheck + vitest (59 tests) + build
+pnpm install --frozen-lockfile
+npm run check          # biome + typecheck + vitest + build
+npm run test:install   # fresh temporary profile; requires dsh 0.1.7-rc.2 and pnpm
 ```
+
+The installation test packs the plugin, installs it through `dsh plugin`, and verifies
+the Agent Card and browser bundle without manually installing Harness peers. It
+cleans up its temporary profile and process and makes no model or remote-agent calls.
+An explicit package or Git spec can be tested with `npm run test:install -- <spec>`.
 
 The suite covers config validation, the Agent Card + JSON-RPC round trip through the official A2A client against a real HTTP listener, per-context session continuity, task cancellation, header auth, per-request overrides, and the model-facing tools.
 

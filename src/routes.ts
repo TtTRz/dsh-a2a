@@ -2,8 +2,8 @@
  * Host HTTP routes backing the A2A settings tab.
  *
  * Replaces the Typert Remote `A2aTestService` with plain
- * `webServer.register(...)` routes (the dsh-engram / other-plugins
- * pattern). The typert gateway's SRC claims only recognize Services whose
+ * `webServer.register(...)` routes. The typert gateway's SRC claims only
+ * recognize Services whose
  * registration predates its claims snapshot or which arrive through a
  * manifest; a live Service mounted at plugin `apply()` is never claimed, so
  * the previous `/api/a2a/testAgentCard` and `/api/a2a/serverInfo` returned

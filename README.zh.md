@@ -29,7 +29,9 @@
 ## 🚀 快速开始
 
 ```sh
-dsh plugin --profile web add dsh-a2a
+# 当前修订仅针对 dsh 0.1.7-rc.2。
+npm install -g @deepseek-ai/dsh@0.1.7-rc.2
+dsh plugin --profile web add github:TtTRz/dsh-a2a
 
 export A2A_HOST=127.0.0.1
 export A2A_PORT=8899
@@ -45,6 +47,41 @@ curl -s http://127.0.0.1:8899/ -H 'Content-Type: application/json' \
 ```
 
 `A2A_ENABLED=0` 只跑 client 工具，不开监听。
+
+## 兼容版本与安装说明
+
+0.7.2 源码修订针对 **dsh 0.1.7-rc.2**。Harness 的 peer 与构建依赖均锁定为该版本；
+Cordis 锁定 `4.0.4`，Cosmokit 锁定 `1.8.5`，Schemastery 锁定 `3.18.4`。
+其他 Harness 版本不在本次兼容性声明范围内。Node.js 至少需要 `22.19`；安装回归在
+Linux、Node.js 26 和 pnpm 11 上验证。
+
+快速开始使用 GitHub 源码，因为修复可能先于 npm 发布。
+需要固定安装版本时，使用经过审核的完整提交 SHA：`github:TtTRz/dsh-a2a#<commit>`。
+
+pnpm 11 首次安装 Git 依赖时可能报 `ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED`。
+将 **pnpm 输出的完整 `allowBuilds` 条目**加入对应 profile 的 `pnpm-workspace.yaml`，
+保留已有设置，再执行同一安装命令。该条目包含 Git 来源和解析后的提交 SHA；
+仅允许包名 `dsh-a2a` 不够。确认提交内容后再允许其执行 `prepare` 构建，
+无需全局放开所有依赖的构建脚本。
+
+**不要逐个向 profile 安装缺失的 Harness peer 包。** dsh 通过运行时模块解析器提供这些依赖。
+其生成的 `pnpm-workspace.yaml` 会设置 `autoInstallPeers: false` 和 `nodeLinker: hoisted`，
+请保留这些设置。`pnpm peers check` 和单独执行的 `node import(...)` 都不经过 dsh 的解析器，
+不能据此判断插件加载失败。无版本号的 `pnpm add @deepseek-ai/dsh-*` 可能选中陈旧的
+`latest` 标签，让不兼容的包覆盖宿主依赖，形成 [#6](https://github.com/TtTRz/dsh-a2a/issues/6)
+中的连锁冲突。
+
+如果旧 profile 已经手动安装过 Harness 包，可先在新 profile 验证，保留原有配置：
+
+```sh
+dsh --profile a2a-test --from-default-profile web --dump-config > /dev/null
+dsh plugin --profile a2a-test add github:TtTRz/dsh-a2a
+A2A_PORT=8900 dsh --profile a2a-test --port 3100 --no-open
+```
+
+端口被占用时请改用空闲端口。安装成功后应能访问
+`http://127.0.0.1:8900/.well-known/agent-card.json`。
+清理旧 profile 中手动添加的依赖前，应先备份并逐项核对用途。
 
 ## ⚙️ 配置
 
@@ -190,8 +227,14 @@ patch 层改动在装配期读取，改完需重启 `dsh web` 才生效；GUI �
 ## 🧪 开发
 
 ```sh
-npm run check   # biome + typecheck + vitest（59 个测试）+ 构建
+pnpm install --frozen-lockfile
+npm run check          # biome + typecheck + vitest + 构建
+npm run test:install   # 临时全新 profile；需要 dsh 0.1.7-rc.2 和 pnpm
 ```
+
+安装测试会打包插件，通过 `dsh plugin` 安装，再检查 Agent Card 和浏览器 bundle，
+不手动补装 Harness peer 包。测试结束后自动清理临时 profile 和进程，不调用模型或远程 agent。
+也可以通过 `npm run test:install -- <spec>` 验证指定安装包或 Git 依赖。
 
 测试覆盖配置校验、官方 A2A client 走真实 HTTP 端口的 Agent Card + JSON-RPC 往返、按 context 会话延续、任务取消、header 鉴权、请求级覆盖与模型工具。
 

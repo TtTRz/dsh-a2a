@@ -17,7 +17,7 @@
  */
 
 import { createHash, randomUUID } from 'node:crypto'
-import { existsSync, readdirSync } from 'node:fs'
+import { readdirSync } from 'node:fs'
 import { mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { Message, Part, Task, TaskState } from '@a2a-js/sdk'
@@ -251,15 +251,7 @@ export function textOf(message: Message): string {
   return parts.join('\n')
 }
 
-/**
- * Read a LIVE session's events across harness versions.
- *
- * `@deepseek-ai/dsh-session` 0.1.5-rc.2 renamed the `session.events` getter to
- * `session.snapshotEvents()`. This package's pinned types are the older ones,
- * so `session.events` still compiles while the RUNTIME (the deployment's newer
- * package) answers `undefined` — the 2026-09-11 upgrade. Prefer the new
- * accessor and fall back to the old getter so either runtime works.
- */
+/** Read a session snapshot; tolerate legacy event getters in adopted agents. */
 export function liveEvents(session: unknown): readonly SessionEvent[] {
   const target = session as
     | {
@@ -276,17 +268,14 @@ export function liveEvents(session: unknown): readonly SessionEvent[] {
 /**
  * Collect the durable image attachment refs produced during one turn: cards
  * rendered by tools (e.g. `render_card`) land as image blocks inside
- * tool-result events. Returns them oldest-first.
+ * tool/result messages. Returns them oldest-first.
  */
 export function collectImageRefs(events: readonly SessionEvent[]): ImageAttachmentRef[] {
   const images: ImageAttachmentRef[] = []
   for (const event of events) {
     if (event.type !== 'tool/result') continue
     for (const block of event.data.message.content ?? []) {
-      if (block.type !== 'tool-result') continue
-      for (const inner of block.content) {
-        if (inner.type === 'image') images.push(inner.attachment)
-      }
+      if (block.type === 'image') images.push(block.attachment)
     }
   }
   return images

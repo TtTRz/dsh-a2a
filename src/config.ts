@@ -8,6 +8,7 @@
 
 import { homedir } from 'node:os'
 import { isAbsolute, join } from 'node:path'
+import type { Volatile } from '@deepseek-ai/cosmokit'
 import z from '@deepseek-ai/schemastery'
 
 export interface AgentCardOptions {
@@ -104,24 +105,21 @@ export interface AgentSkillSpec {
   description: string
 }
 
+/** A raw setting or the live reference supplied by the Harness loader. */
+type LiveValue<T> = T | Volatile<T | undefined>
+
 export interface Config {
   server?: ServerOptions
-  agents?: AgentEntry[]
-  serverAgents?: AgentSpec[]
-  apiKey?: string
+  agents?: LiveValue<AgentEntry[]>
+  serverAgents?: LiveValue<AgentSpec[]>
+  apiKey?: LiveValue<string>
 }
 
 export const DEFAULT_PORT = 8899
 export const DEFAULT_TURN_TIMEOUT_MS = 300_000
 export const DEFAULT_CALL_TIMEOUT_MS = 300_000
 
-// rc.2 extends schemastery fields with volatile configuration metadata.
-function liveField<S, T>(schema: z<S, T>): z<S, T> {
-  const field = schema as z<S, T> & { volatile?: () => z<S, T> }
-  return typeof field.volatile === 'function' ? field.volatile() : field
-}
-
-export const Config: z<Config> = z.object({
+export const Config = z.object({
   server: z.object({
     enabled: z.boolean().default(true),
     host: z.string().default('127.0.0.1'),
@@ -166,20 +164,19 @@ export const Config: z<Config> = z.object({
     workspaceTitle: z.string().default('A2A'),
     allowOverrides: z.boolean().default(true),
   }),
-  agents: liveField(
-    z
-      .array(
-        z.object({
-          name: z.string(),
-          url: z.string(),
-          headers: z.any(),
-          description: z.string(),
-        }),
-      )
-      .default([]),
-  ),
-  serverAgents: liveField(z.array(z.any()).default([])),
-  apiKey: liveField(z.string().role('secret').default('')),
+  agents: z
+    .array(
+      z.object({
+        name: z.string(),
+        url: z.string(),
+        headers: z.any(),
+        description: z.string(),
+      }),
+    )
+    .default([])
+    .volatile(),
+  serverAgents: z.array(z.any()).default([]).volatile(),
+  apiKey: z.string().role('secret').default('').volatile(),
 })
 
 export interface ResolvedAgentSpec {
@@ -528,13 +525,13 @@ export function resolveConfig(input: Config): ResolvedConfig {
 }
 
 /** Unwrap a volatile configuration ref, leaving ordinary config values alone. */
-export function readLive<T>(value: T | { get(): T } | undefined, fallback: T): T {
+export function readLive<T>(value: LiveValue<T> | undefined, fallback: T): T {
   if (
     value !== null &&
     typeof value === 'object' &&
     'get' in value &&
     typeof value.get === 'function'
   )
-    return value.get()
+    return (value.get() ?? fallback) as T
   return (value ?? fallback) as T
 }

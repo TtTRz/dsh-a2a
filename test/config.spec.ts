@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { Config, resolveConfig } from '../src/config.js'
+import { Config, readLive, resolveConfig } from '../src/config.js'
 
 describe('resolveConfig', () => {
   it('applies defaults for an empty config', () => {
@@ -40,5 +40,13 @@ describe('resolveConfig', () => {
 
   it('exposes the cordis schema with defaults', () => {
     expect(Config).toBeDefined()
+  })
+
+  it('reads rc.2 volatile fields produced by the actual schema', () => {
+    const config = Config({ agents: [{ name: 'local', url: 'http://127.0.0.1:9000' }] })
+    expect(config.agents).toHaveProperty('get')
+    expect(readLive(config.agents, [])[0]?.name).toBe('local')
+    expect(resolveConfig(config).agents[0]?.name).toBe('local')
+    expect(resolveConfig(Config({})).agents).toEqual([])
   })
 })

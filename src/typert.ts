@@ -9,8 +9,7 @@
  * Typert Remote service — the typert gateway's SRC claims only recognize
  * Services registered before its snapshot (or via a manifest), so a live
  * Service mounted at plugin `apply()` silently drops its `/api/*` routes and
- * the panel 404s (the same failure class documented in related plugins and
- * other-plugins).
+ * the panel returns 404.
  *
  * @module dsh-a2a/typert
  */
