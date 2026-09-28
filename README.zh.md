@@ -1,5 +1,7 @@
 # dsh-a2a
 
+[English](README.md) | [简体中文](README.zh.md)
+
 > [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的 A2A v1.0 插件——把 harness 暴露为 A2A agent，也让 harness agent 能调远程 A2A agent。
 
 [![npm version](https://img.shields.io/npm/v/dsh-a2a)](https://www.npmjs.com/package/dsh-a2a)
@@ -31,7 +33,7 @@
 ```sh
 # 当前修订仅针对 dsh 0.1.7-rc.2。
 npm install -g @deepseek-ai/dsh@0.1.7-rc.2
-dsh plugin --profile web add github:TtTRz/dsh-a2a
+dsh plugin --profile web add dsh-a2a@0.7.2
 
 export A2A_HOST=127.0.0.1
 export A2A_PORT=8899
@@ -50,13 +52,16 @@ curl -s http://127.0.0.1:8899/ -H 'Content-Type: application/json' \
 
 ## 兼容版本与安装说明
 
-0.7.2 源码修订针对 **dsh 0.1.7-rc.2**。Harness 的 peer 与构建依赖均锁定为该版本；
+0.7.2 版本针对 **dsh 0.1.7-rc.2**。Harness 的 peer 与构建依赖均锁定为该版本；
 Cordis 锁定 `4.0.4`，Cosmokit 锁定 `1.8.5`，Schemastery 锁定 `3.18.4`。
 其他 Harness 版本不在本次兼容性声明范围内。Node.js 至少需要 `22.19`；安装回归在
 Linux、Node.js 26 和 pnpm 11 上验证。
 
-快速开始使用 GitHub 源码，因为修复可能先于 npm 发布。
-需要固定安装版本时，使用经过审核的完整提交 SHA：`github:TtTRz/dsh-a2a#<commit>`。
+npm 包自带构建产物，无需授权 Git 依赖的构建脚本。升级时重复上面的固定版本安装命令，
+然后重启目标 profile。版本变更见 [CHANGELOG](CHANGELOG.md)。
+
+如需从 Git 安装，请固定经过审核的完整提交 SHA：
+`dsh plugin --profile web add github:TtTRz/dsh-a2a#<commit>`。
 
 pnpm 11 首次安装 Git 依赖时可能报 `ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED`。
 将 **pnpm 输出的完整 `allowBuilds` 条目**加入对应 profile 的 `pnpm-workspace.yaml`，
@@ -75,7 +80,7 @@ pnpm 11 首次安装 Git 依赖时可能报 `ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWE
 
 ```sh
 dsh --profile a2a-test --from-default-profile web --dump-config > /dev/null
-dsh plugin --profile a2a-test add github:TtTRz/dsh-a2a
+dsh plugin --profile a2a-test add dsh-a2a@0.7.2
 A2A_PORT=8900 dsh --profile a2a-test --port 3100 --no-open
 ```
 

@@ -7,11 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-09-28
+
 ### Fixed
 
 - Restore settings on dsh rc.2 using config forms, volatile fields and current icons.
 - Read live session snapshots on newer harness versions when collecting replies and cards.
 - Strip the REST cancellation suffix before looking up a task.
+- Align shared SDK peers with Harness 0.1.7-rc.2 and remove obsolete plugin
+  dependencies to fix installation conflicts ([#6](https://github.com/TtTRz/dsh-a2a/issues/6)).
+- Register the settings client against the current renderer and settings plugins.
+- Return tool images in the current Harness tool-message format.
+
+### Changed
+
+- Document npm installation, exact rc.2 compatibility, and Git build approvals
+  in English and Chinese; use generic examples without deployment identities.
+
+### Added
+
+- A fresh-profile installation smoke test covering Agent Card discovery and
+  the settings client bundle without manually installing Harness peers.
 
 ## [0.7.1] - 2026-08-31
 

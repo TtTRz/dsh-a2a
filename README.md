@@ -1,5 +1,7 @@
 # dsh-a2a
 
+[English](README.md) | [简体中文](README.zh.md)
+
 > A2A v1.0 for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) — expose the harness as an A2A agent, and let harness agents delegate to remote A2A agents.
 
 [![npm version](https://img.shields.io/npm/v/dsh-a2a)](https://www.npmjs.com/package/dsh-a2a)
@@ -31,7 +33,7 @@ One plugin, two halves, built on the official [`@a2a-js/sdk`](https://github.com
 ```sh
 # This revision targets exactly dsh 0.1.7-rc.2.
 npm install -g @deepseek-ai/dsh@0.1.7-rc.2
-dsh plugin --profile web add github:TtTRz/dsh-a2a
+dsh plugin --profile web add dsh-a2a@0.7.2
 
 export A2A_HOST=127.0.0.1
 export A2A_PORT=8899
@@ -50,15 +52,19 @@ curl -s http://127.0.0.1:8899/ -H 'Content-Type: application/json' \
 
 ## Compatibility and installation
 
-The 0.7.2 source revision targets **dsh 0.1.7-rc.2**. Its Harness peers and
+Version 0.7.2 targets **dsh 0.1.7-rc.2**. Its Harness peers and
 build dependencies are pinned to that release; Cordis is pinned to `4.0.4`,
 Cosmokit to `1.8.5`, and Schemastery to `3.18.4`. Other Harness releases are
 not covered by this compatibility claim. Node.js must be at least `22.19`.
 The installation smoke test runs on Linux with Node.js 26 and pnpm 11.
 
-The quick start installs from GitHub because the source fix may precede the
-npm release. For reproducible deployments, append a reviewed full commit SHA
-to the Git spec: `github:TtTRz/dsh-a2a#<commit>`.
+The npm package includes prebuilt bundles; installing it does not require a
+Git dependency build approval. Upgrade with the same pinned install command
+shown above, then restart the target profile. See the [changelog](CHANGELOG.md)
+for release details.
+
+To install from Git instead, pin a reviewed full commit SHA:
+`dsh plugin --profile web add github:TtTRz/dsh-a2a#<commit>`.
 
 With pnpm 11, the first Git install may stop with
 `ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED`. Copy the **exact `allowBuilds` entry
@@ -81,7 +87,7 @@ first verify the plugin in a fresh profile without changing the original:
 
 ```sh
 dsh --profile a2a-test --from-default-profile web --dump-config > /dev/null
-dsh plugin --profile a2a-test add github:TtTRz/dsh-a2a
+dsh plugin --profile a2a-test add dsh-a2a@0.7.2
 A2A_PORT=8900 dsh --profile a2a-test --port 3100 --no-open
 ```
 
