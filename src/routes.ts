@@ -110,11 +110,28 @@ export function registerA2aRoutes(
 
       const disposers: Array<() => void> = []
 
+      // These routes answer with/rotate the endpoint Bearer key and can drive
+      // outbound fetches; once a key is configured they must only serve
+      // callers who already hold it. With no key configured (first-run
+      // bootstrap) they stay open — there is no secret to disclose yet.
+      const managementAuthorized = (req: IncomingMessage): boolean => {
+        const expected = ref.server?.apiKey
+        if (typeof expected !== 'string' || expected.length === 0) return true
+        const headers = (req.headers ?? {}) as Record<string, string | string[] | undefined>
+        const presented = headers.authorization
+        const value = Array.isArray(presented) ? presented[0] : presented
+        return value === `Bearer ${expected}`
+      }
+
       disposers.push(
         webServer.register({
           kind: 'exact',
           path: '/api/a2a/testAgentCard',
           handler: async (req, res) => {
+            if (!managementAuthorized(req)) {
+              send(res, 401, { error: 'unauthorized' })
+              return
+            }
             let target: string
             let headers: Record<string, string>
             try {
@@ -154,7 +171,11 @@ export function registerA2aRoutes(
         webServer.register({
           kind: 'exact',
           path: '/api/a2a/serverInfo',
-          handler: (_req, res) => {
+          handler: (req, res) => {
+            if (!managementAuthorized(req)) {
+              send(res, 401, { error: 'unauthorized' })
+              return
+            }
             send(res, 200, serverInfoOf(ref))
           },
         }),
@@ -164,7 +185,11 @@ export function registerA2aRoutes(
         webServer.register({
           kind: 'exact',
           path: '/api/a2a/regenerateKey',
-          handler: (_req, res) => {
+          handler: (req, res) => {
+            if (!managementAuthorized(req)) {
+              send(res, 401, { error: 'unauthorized' })
+              return
+            }
             const server = ref.server
             if (server === undefined) {
               send(res, 400, { error: 'A2A endpoint is disabled' })

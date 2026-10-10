@@ -367,7 +367,15 @@ export class A2aServer {
     if (req.method === 'POST' && sub === 'message:send') {
       const raw = (await readBody(req)).toString('utf8')
       const body = raw.length > 0 ? JSON.parse(raw) : {}
-      sendJson(res, 200, await route.handler.sendMessage(restBody(body), new ServerCallContext()))
+      const result = await route.handler.sendMessage(restBody(body), new ServerCallContext())
+      // The REST binding answers with a SendMessageResponse envelope; a bare
+      // Task object is rejected by the official client ("Invalid
+      // SendMessageResponse: missing result").
+      const envelope =
+        result !== null && typeof result === 'object' && 'messageId' in result
+          ? { message: result }
+          : { task: result }
+      sendJson(res, 200, envelope)
       return
     }
     if (req.method === 'GET' && sub === 'tasks') {

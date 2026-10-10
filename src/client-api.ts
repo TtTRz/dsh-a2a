@@ -41,11 +41,24 @@ interface ErrorPayload {
   error?: string
 }
 
+/** Bearer header for the management routes; omitted when no key is known. */
+function authHeaders(bearer: string | undefined): Record<string, string> {
+  return bearer !== undefined && bearer.length > 0 ? { authorization: `Bearer ${bearer}` } : {}
+}
+
 /** Probe one remote agent card through the Host route; rejects on any failure. */
-export async function probeCard(url: string, headers: Record<string, string>): Promise<CardProbe> {
+export async function probeCard(
+  url: string,
+  headers: Record<string, string>,
+  bearer?: string,
+): Promise<CardProbe> {
   const response = await fetch(TEST_CARD, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', accept: 'application/json' },
+    headers: {
+      'content-type': 'application/json',
+      accept: 'application/json',
+      ...authHeaders(bearer),
+    },
     body: JSON.stringify({ url, headers }),
   })
   const payload = (await response.json()) as CardProbe & ErrorPayload
@@ -54,9 +67,9 @@ export async function probeCard(url: string, headers: Record<string, string>): P
 }
 
 /** Read the inbound server summary through the Host route; rejects on failure. */
-export async function fetchServerInfo(): Promise<ServerInfoValue> {
+export async function fetchServerInfo(bearer?: string): Promise<ServerInfoValue> {
   const response = await fetch(SERVER_INFO, {
-    headers: { accept: 'application/json' },
+    headers: { accept: 'application/json', ...authHeaders(bearer) },
   })
   if (!response.ok) throw new Error(`HTTP ${String(response.status)}`)
   const payload = (await response.json()) as ServerInfoValue
@@ -65,10 +78,10 @@ export async function fetchServerInfo(): Promise<ServerInfoValue> {
 }
 
 /** Rotate the endpoint Bearer key through the Host route; resolves the new key. */
-export async function regenerateKey(): Promise<string> {
+export async function regenerateKey(bearer?: string): Promise<string> {
   const response = await fetch(REGENERATE_KEY, {
     method: 'POST',
-    headers: { accept: 'application/json' },
+    headers: { accept: 'application/json', ...authHeaders(bearer) },
   })
   const payload = (await response.json()) as { ok?: true; apiKey?: string } & ErrorPayload
   if (!response.ok || payload.apiKey === undefined) {

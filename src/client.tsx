@@ -116,6 +116,7 @@ interface ScopeLike {
       | {
           agents?: StoredAgent[]
           serverAgents?: ServedAgent[]
+          apiKey?: string
         }
       | undefined
     user: unknown
@@ -471,7 +472,7 @@ function A2aCard(props: { scope: ScopeLike }): ReactNode {
           const key = pair.key.trim()
           if (key.length > 0) headers[key] = pair.value
         }
-        const card = await probeCard(url, headers)
+        const card = await probeCard(url, headers, snapshot.value?.apiKey)
         setProbe(row.id, {
           status: 'ok',
           url,
@@ -488,7 +489,7 @@ function A2aCard(props: { scope: ScopeLike }): ReactNode {
         inflight.current.delete(row.id)
       }
     },
-    [setProbe],
+    [setProbe, snapshot.value?.apiKey],
   )
   const adopt = (row: DraftRow, probe: RowProbe): void => {
     if (probe.remoteName !== undefined) edit(row.id, { name: probe.remoteName })
@@ -1119,6 +1120,8 @@ function ServerInfoPanel(props: { scope: ScopeLike }): ReactNode {
     () => scope.getSnapshot(),
   )
   const serverAgents = snapshot.value?.serverAgents ?? []
+  /** The persisted endpoint key; management routes require it once configured. */
+  const knownKey = snapshot.value?.apiKey ?? ''
   const [info, setInfo] = useState<ServerInfoValue | null>(null)
   const [loading, setLoading] = useState(true)
   const [failed, setFailed] = useState(false)
@@ -1171,20 +1174,21 @@ function ServerInfoPanel(props: { scope: ScopeLike }): ReactNode {
   }
   const refreshServerInfo = useCallback(async (): Promise<void> => {
     try {
-      const value = await fetchServerInfo()
+      const value = await fetchServerInfo(knownKey.length > 0 ? knownKey : undefined)
       setInfo(value)
     } catch {
       setFailed(true)
     } finally {
       setLoading(false)
     }
-  }, [])
-  // biome-ignore lint/correctness/useExhaustiveDependencies: one-shot load on mount; the refresh button is the reload path.
+  }, [knownKey])
+  // Load on mount and re-load once the settings scope surfaces the persisted
+  // key (it may arrive after mount); the refresh button is the manual path.
   useEffect(() => {
     setLoading(true)
     setFailed(false)
     void refreshServerInfo()
-  }, [])
+  }, [refreshServerInfo])
 
   const valueStyle: Record<string, string> = {
     margin: 0,
@@ -1243,7 +1247,7 @@ function ServerInfoPanel(props: { scope: ScopeLike }): ReactNode {
     if (refreshingToken) return
     setRefreshingToken(true)
     try {
-      const apiKey = await regenerateKey()
+      const apiKey = await regenerateKey(knownKey.length > 0 ? knownKey : undefined)
       setInfo((current) => (current === null ? current : { ...current, apiKey, apiKeySet: true }))
       setShowToken(true)
       setFailed(false)

@@ -215,14 +215,64 @@ describe('A2A server with a harness executor', () => {
         }),
       })
       expect(response.status).toBe(200)
-      const task = (await response.json()) as {
-        status: { state: TaskState; message?: Message }
+      // The REST binding wraps the result as SendMessageResponse: a bare Task
+      // object is rejected by the official client ("Invalid SendMessageResponse:
+      // missing result").
+      const payload = (await response.json()) as {
+        task?: { status: { state: TaskState; message?: Message } }
       }
-      expect(task.status.state).toBe(TaskState.TASK_STATE_COMPLETED)
-      const reply = (task.status.message?.parts ?? [])
+      expect(payload.task).toBeDefined()
+      expect(payload.task?.status.state).toBe(TaskState.TASK_STATE_COMPLETED)
+      const reply = (payload.task?.status.message?.parts ?? [])
         .map((part) => (part.content?.$case === 'text' ? part.content.value : ''))
         .join('')
       expect(reply).toBe('pong')
+    } finally {
+      await server.stop()
+    }
+  })
+
+  it('returns only the current turn reply for follow-ups in one context', async () => {
+    const port = await freePort()
+    const agents = new Map<string, FakeAgent>()
+    const executor = new DshAgentExecutor(fakeCtx(agents), {
+      agentId: 'test',
+      preset: 'standard',
+      turnTimeoutMs: 10_000,
+    })
+    const server = new A2aServer({
+      config: resolveConfig({ server: { host: '127.0.0.1', port } }).server,
+      agents: [{ agent: testAgent, executor }],
+    })
+    await server.start()
+    try {
+      const client = await new ClientFactory(ClientFactoryOptions.default).createFromUrl(
+        `${server.url}agents/test/`,
+      )
+      const message = (text: string): Message => ({
+        ...userMessage(text),
+        messageId: Math.random().toString(),
+        contextId: 'ctx-reply',
+      })
+      const replies: string[] = []
+      for (const text of ['one', 'two']) {
+        const result = await client.sendMessage({
+          tenant: '',
+          message: message(text),
+          configuration: undefined,
+          metadata: undefined,
+        })
+        const task = result as unknown as { status: { message?: Message } }
+        replies.push(
+          (task.status.message?.parts ?? [])
+            .map((part) => (part.content?.$case === 'text' ? part.content.value : ''))
+            .join(''),
+        )
+      }
+      // Each turn's reply must contain only that turn's assistant text; the
+      // session event log keeps every turn, so replaying it would echo the
+      // previous answer back inside the new one.
+      expect(replies).toEqual(['pong', 'pong'])
     } finally {
       await server.stop()
     }

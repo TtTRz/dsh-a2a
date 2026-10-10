@@ -361,6 +361,10 @@ export class DshAgentExecutor implements AgentExecutor {
         overrides,
       )
       this.running.set(taskId, turn)
+      // The session event log keeps every turn of the (adopted) session; the
+      // reply and card artifacts must only cover events minted by THIS turn,
+      // so anchor on the log length before the user message is submitted.
+      const baseline = liveEvents(turn.agent.session).length
       turn.agent.followup(
         createUserMessage({
           content: [{ type: 'text', text: textOf(userMessage) }],
@@ -376,7 +380,8 @@ export class DshAgentExecutor implements AgentExecutor {
       // artifacts BEFORE the terminal status: the SDK's execution queue ends
       // the event stream at the first terminal statusUpdate, so artifacts
       // published afterwards would never reach the caller.
-      await this.publishCardArtifacts(eventBus, taskId, contextId, liveEvents(turn.agent.session))
+      const turnEvents = liveEvents(turn.agent.session).slice(baseline)
+      await this.publishCardArtifacts(eventBus, taskId, contextId, turnEvents)
       // The reply must ride ON the terminal status: publishing a separate
       // message first would strand the task in WORKING forever in the task
       // store.
@@ -386,7 +391,7 @@ export class DshAgentExecutor implements AgentExecutor {
           contextId,
           status: status(
             TaskStateEnum.TASK_STATE_COMPLETED,
-            agentMessage(collectReplyText(liveEvents(turn.agent.session)), taskId, contextId),
+            agentMessage(collectReplyText(turnEvents), taskId, contextId),
           ),
           metadata: {},
         }),

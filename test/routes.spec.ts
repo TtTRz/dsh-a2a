@@ -85,7 +85,7 @@ describe('registerA2aRoutes', () => {
     expect(res.statusCode).toBe(400)
   })
 
-  it('surfaces the apiKey in serverInfo when configured', async () => {
+  it('rejects serverInfo without the key once an apiKey is configured', async () => {
     const webServer = { register: (_r: CapturedRoute) => () => undefined }
     const { ctx, routes } = registerWith(webServer)
     const server = resolveConfig({
@@ -95,9 +95,72 @@ describe('registerA2aRoutes', () => {
     registerA2aRoutes(ctx, ref)
     const route = routes.find((r) => r.path === '/api/a2a/serverInfo')
     const res = fakeRes()
-    await route?.handler({} as IncomingMessage, res as ServerResponse)
-    const payload = JSON.parse(String(res.body)) as { apiKeySet: boolean; apiKey?: string }
+    await route?.handler({ headers: {} } as IncomingMessage, res as ServerResponse)
+    expect(res.statusCode).toBe(401)
+  })
+
+  it('surfaces the apiKey in serverInfo only to bearers of the key', async () => {
+    const webServer = { register: (_r: CapturedRoute) => () => undefined }
+    const { ctx, routes } = registerWith(webServer)
+    const server = resolveConfig({
+      server: { host: '127.0.0.1', port: 8899, apiKey: 'secret-key' },
+    }).server
+    const ref: ServerRef = { server, agentCard: { name: 'n', description: 'd' } }
+    registerA2aRoutes(ctx, ref)
+    const route = routes.find((r) => r.path === '/api/a2a/serverInfo')
+
+    const wrong = fakeRes()
+    await route?.handler(
+      { headers: { authorization: 'Bearer nope' } } as unknown as IncomingMessage,
+      wrong as ServerResponse,
+    )
+    expect(wrong.statusCode).toBe(401)
+
+    const right = fakeRes()
+    await route?.handler(
+      { headers: { authorization: 'Bearer secret-key' } } as unknown as IncomingMessage,
+      right as ServerResponse,
+    )
+    expect(right.statusCode).toBe(200)
+    const payload = JSON.parse(String(right.body)) as { apiKeySet: boolean; apiKey?: string }
     expect(payload.apiKeySet).toBe(true)
     expect(payload.apiKey).toBe('secret-key')
+  })
+
+  it('serves serverInfo openly when no apiKey is configured', async () => {
+    const webServer = { register: (_r: CapturedRoute) => () => undefined }
+    const { ctx, routes } = registerWith(webServer)
+    const ref = refOf()
+    registerA2aRoutes(ctx, ref)
+    const route = routes.find((r) => r.path === '/api/a2a/serverInfo')
+    const res = fakeRes()
+    await route?.handler({ headers: {} } as IncomingMessage, res as ServerResponse)
+    expect(res.statusCode).toBe(200)
+    const payload = JSON.parse(String(res.body)) as { apiKeySet: boolean; apiKey?: string }
+    expect(payload.apiKeySet).toBe(false)
+  })
+
+  it('rejects key rotation and card probing without the key once configured', async () => {
+    const webServer = { register: (_r: CapturedRoute) => () => undefined }
+    const { ctx, routes } = registerWith(webServer)
+    const server = resolveConfig({
+      server: { host: '127.0.0.1', port: 8899, apiKey: 'secret-key' },
+    }).server
+    const ref: ServerRef = { server, agentCard: { name: 'n', description: 'd' } }
+    const persistKey = vi.fn()
+    registerA2aRoutes(ctx, ref, persistKey)
+
+    const rotate = routes.find((r) => r.path === '/api/a2a/regenerateKey')
+    const rotateRes = fakeRes()
+    await rotate?.handler({ headers: {} } as IncomingMessage, rotateRes as ServerResponse)
+    expect(rotateRes.statusCode).toBe(401)
+    expect(persistKey).not.toHaveBeenCalled()
+    // The configured key must survive the rejected rotation.
+    expect(server.apiKey).toBe('secret-key')
+
+    const probe = routes.find((r) => r.path === '/api/a2a/testAgentCard')
+    const probeRes = fakeRes()
+    await probe?.handler({ headers: {} } as IncomingMessage, probeRes as ServerResponse)
+    expect(probeRes.statusCode).toBe(401)
   })
 })
